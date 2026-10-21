@@ -8,7 +8,9 @@ Two modes (MODE):
   plan     the searches that are due from the search_keywords × locations lists in the database (planner.py), at
            most MAX_TASKS of them, stopping early after TIME_BUDGET_MINUTES. Each search's files go to its own folder
            in OUT_DIR, with summary.md listing them. The environment's filters are the defaults for every search.
-  plan-only  prints what `plan` would search, and does nothing else.
+  sweep    every pair from the lists, due or not, each looking back the full HOURS_OLD, one after another with
+           GAP_SECONDS between them (.github/workflows/sweep.yml). No MAX_TASKS; TIME_BUDGET_MINUTES defaults to 330.
+  plan-only  prints what `plan` would search, and does nothing else (with PLAN_ALL=true, what `sweep` would).
 
 Jobs already in the database (seen in the last KNOWN_DAYS) are only marked as seen again, without reading their job
 pages, when SKIP_KNOWN is on (default: on in plan mode, off for a single search, so its report shows every job).
@@ -26,16 +28,19 @@ import report
 import sources
 from search import env, env_bool, env_int, from_env
 
-MODE                 = env("MODE", "single").lower()   # single | plan | plan-only
+MODE                 = env("MODE", "single").lower()   # single | plan | sweep | plan-only
+SWEEP                = MODE == "sweep" or env_bool("PLAN_ALL", False)
 OUT_DIR              = env("OUT_DIR", "out")
 DATABASE_URL         = env("DATABASE_URL", None)       # Supabase Postgres; unset = files only
 DRY_RUN              = env_bool("DRY_RUN", False)      # true: files only, even with DATABASE_URL set
 EXPIRE_DAYS          = env_int("EXPIRE_DAYS", 7)       # jobs not seen for this many days are marked closed
 KNOWN_DAYS           = env_int("KNOWN_DAYS", EXPIRE_DAYS)
 SKIP_KNOWN           = env_bool("SKIP_KNOWN", MODE != "single")
-MAX_TASKS            = env_int("MAX_TASKS", 4)         # searches per planned run
+MAX_TASKS            = env_int("MAX_TASKS", 100000 if SWEEP else 4)   # searches per planned run
 DEFAULT_INTERVAL     = env_int("DEFAULT_INTERVAL_HOURS", 2)   # how often a pair is due, unless the lists say
-TIME_BUDGET_MINUTES  = env_int("TIME_BUDGET_MINUTES", 8)      # no new search starts after this (the schedule is 10 min)
+TIME_BUDGET_MINUTES  = env_int("TIME_BUDGET_MINUTES", 330 if SWEEP else 8)   # no new search starts after this (the
+                                                                             # schedule is 10 min, a job at most 6 h)
+GAP_SECONDS          = env_int("GAP_SECONDS", 60 if SWEEP else 0)            # pause between searches
 
 log = logging.getLogger(__name__)
 
@@ -62,8 +67,8 @@ def print_jobs(result):
 def main():
     sys.stdout.reconfigure(line_buffering=True)
     logging.basicConfig(level=logging.INFO, format="%(levelname)-7s %(message)s", stream=sys.stdout)
-    if MODE not in ("single", "plan", "plan-only"):
-        raise SystemExit(f"MODE must be single, plan or plan-only, got {MODE!r}")
+    if MODE not in ("single", "plan", "sweep", "plan-only"):
+        raise SystemExit(f"MODE must be single, plan, sweep or plan-only, got {MODE!r}")
     defaults = from_env()
     saving = bool(DATABASE_URL) and not DRY_RUN and MODE != "plan-only"
     if MODE != "single" and not DATABASE_URL:
@@ -87,11 +92,13 @@ def main():
     else:
         import planner
         planned, due, lists = planner.plan(conn.cursor(), sources.AVAILABLE, defaults, datetime.now(timezone.utc),
-                                           default_interval_hours=DEFAULT_INTERVAL, max_tasks=MAX_TASKS)
+                                           default_interval_hours=DEFAULT_INTERVAL, max_tasks=MAX_TASKS,
+                                           due_only=not SWEEP)
         searches = [p.search for p in planned]
         plan_note = (f"{lists['keywords']} active keywords × {lists['locations']} active locations × "
-                     f"{', '.join(lists['sources']) or 'no enabled sources'}: {due} due, running {len(searches)} "
-                     f"(MAX_TASKS {MAX_TASKS}).")
+                     f"{', '.join(lists['sources']) or 'no enabled sources'}: {due} {'pairs' if SWEEP else 'due'}, "
+                     f"running {len(searches)}"
+                     + (f", {GAP_SECONDS}s apart." if SWEEP else f" (MAX_TASKS {MAX_TASKS})."))
         print(f"\n📋 {plan_note}")
         for p in planned:
             print(f"  {p.search.source:<9} {p.search.name:<50} last {p.search.hours_old}h"
@@ -105,6 +112,8 @@ def main():
     started, results = time.monotonic(), []
     known = {}
     for i, search in enumerate(searches, 1):
+        if i > 1 and GAP_SECONDS:
+            time.sleep(GAP_SECONDS)
         if MODE != "single" and time.monotonic() - started > TIME_BUDGET_MINUTES * 60:
             print(f"\n⏱  {TIME_BUDGET_MINUTES} minutes used (TIME_BUDGET_MINUTES): leaving "
                   f"{len(searches) - i + 1} searches for the next run")
@@ -129,6 +138,7 @@ def main():
 
         saved = None
         if saving:
+            conn = db.alive(conn, DATABASE_URL)     # a sweep runs for hours; the pooler may drop an idle connection
             saved = db.save(conn, search, result)
             if search.source in known:      # this run's later searches only mark them seen
                 known[search.source].update(r["job_id"] for r in result.rows)
@@ -137,6 +147,7 @@ def main():
         results.append(dict(meta=result.meta, saved=saved, folder=folder))
 
     if saving:
+        conn = db.alive(conn, DATABASE_URL)
         done = db.finish(conn, EXPIRE_DAYS)
         line = (f"Saved to Supabase: {sum(r['saved']['new'] for r in results)} new jobs; linked {done['linked']} to "
                 f"companies, closed {done['closed']} not seen for {EXPIRE_DAYS} days.")

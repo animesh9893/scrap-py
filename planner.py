@@ -1,5 +1,5 @@
 """Which searches a run does (MODE=plan): every active keyword × active location × enabled source, minus the
-exclusions, that is due, most overdue first, cut to the run's budget.
+exclusions, that is due, most overdue first, cut to the run's budget. MODE=sweep takes every pair, due or not.
 
   excluded     the location is in the keyword's excluded_location_ids, or the source is in the location's or the
                keyword's excluded_sources
@@ -26,10 +26,12 @@ class Planned:
     overdue: float          # time since the last try / interval; inf when never tried
 
 
-def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, default_interval_hours, max_tasks):
+def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, default_interval_hours, max_tasks,
+          due_only=True):
     """keywords / locations: dict rows of search_keywords / locations (active ones). sources: enabled source names.
     last_tried / last_ok: {(source, keyword_id, location_id): finished_at}. defaults: the Search the environment
-    describes (distance, results, sort, scan limit, proxies, hours_old, exclude). Returns (planned, due_count)."""
+    describes (distance, results, sort, scan limit, proxies, hours_old, exclude). due_only=False (MODE=sweep): every
+    pair, due or not, each looking back the full hours_old. Returns (planned, due_count)."""
     due = []
     for kw in keywords:
         for loc in locations:
@@ -42,11 +44,12 @@ def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, d
                 hours = min([h for h in (kw["interval_hours"], loc["interval_hours"]) if h] or [default_interval_hours])
                 interval = timedelta(hours=hours)
                 tried = last_tried.get(key)
-                if tried and now - tried < interval - SLACK:
+                if due_only and tried and now - tried < interval - SLACK:
                     continue
                 full = kw["hours_old"] or defaults.hours_old
                 ok = last_ok.get(key)
-                hours_old = min(full, math.ceil((now - ok).total_seconds() / 3600) + 1) if ok and full else full
+                hours_old = (min(full, math.ceil((now - ok).total_seconds() / 3600) + 1) if due_only and ok and full
+                             else full)
                 params = (loc["source_params"] or {}).get(source) or {}
                 search = defaults.but(
                     source=source, term=kw["keyword"], location=loc["name"], name=f"{kw['keyword']} in {loc['name']}",
@@ -62,7 +65,7 @@ def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, d
     return [p for _, p in due[:max_tasks]], len(due)
 
 
-def plan(cur, available_sources, defaults, now, *, default_interval_hours, max_tasks):
+def plan(cur, available_sources, defaults, now, *, default_interval_hours, max_tasks, due_only=True):
     """build() from the database: the active lists, the enabled sources this code has, and scrap-py's past runs."""
     def rows(sql, params=()):
         cur.execute(sql, params)
@@ -80,5 +83,5 @@ def plan(cur, available_sources, defaults, now, *, default_interval_hours, max_t
     key = lambda r: (r["source"], r["keyword_id"], r["location_id"])
     planned, due = build(keywords, locations, sources, {key(r): r["tried"] for r in runs},
                          {key(r): r["ok"] for r in runs if r["ok"]}, defaults, now,
-                         default_interval_hours=default_interval_hours, max_tasks=max_tasks)
+                         default_interval_hours=default_interval_hours, max_tasks=max_tasks, due_only=due_only)
     return planned, due, dict(keywords=len(keywords), locations=len(locations), sources=sources)

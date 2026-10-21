@@ -1,0 +1,63 @@
+name: Full sweep
+
+# Runs every keyword × location pair from the Supabase lists, due or not, one search after another with a pause
+# between them (scrape.py MODE=sweep), and saves every job to Supabase. Each pair looks back the full "hours_old".
+# 63 pairs (9 keywords × 7 cities) take about 2 to 3 hours. Shares the "scrape" concurrency group with the
+# 10-minute schedule, so the two never hit LinkedIn at the same time: scheduled runs wait until the sweep ends.
+on:
+  workflow_dispatch:
+    inputs:
+      hours_old:
+        description: 'Only jobs posted in the last N hours, for every pair (0 = any time)'
+        default: '24'
+      results:
+        description: 'Jobs to keep per pair, after filtering (a keyword''s max_results wins)'
+        default: '50'
+      gap_seconds:
+        description: 'Seconds to wait between two searches'
+        default: '60'
+      refresh:
+        description: 'Re-read the job pages of jobs already saved (slower; refreshes their details)'
+        type: boolean
+        default: false
+      save:
+        description: 'Save the jobs to Supabase (untick for a dry run: files only)'
+        type: boolean
+        default: true
+
+concurrency:
+  group: scrape
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350        # GitHub's limit is 6 hours; scrape.py starts no search after 330 minutes
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -q -r requirements.txt
+      - name: Sweep
+        run: python scrape.py
+        env:
+          MODE: sweep
+          HOURS_OLD: ${{ inputs.hours_old }}
+          RESULTS: ${{ inputs.results }}
+          GAP_SECONDS: ${{ inputs.gap_seconds }}
+          SKIP_KNOWN: ${{ !inputs.refresh }}
+          DRY_RUN: ${{ !inputs.save }}
+          PROXIES: ${{ secrets.PROXIES }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sweep-${{ github.run_number }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14

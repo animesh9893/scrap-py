@@ -29,6 +29,13 @@ Accept: application/vnd.github+json
 {"ref": "main", "inputs": {"search_term": "data engineer", "location": "Pune", "experience": "entry level, associate"}}
 ```
 
+**Full sweep:** Actions → **Full sweep** → **Run workflow** searches every keyword × location pair from the lists,
+due or not, one after another with a minute between searches (`gap_seconds`), each looking back the full `hours_old`
+(24), keeping up to `results` (50) jobs per pair, and saves them all. Jobs already saved are only marked seen again,
+unless `refresh` is ticked. 63 pairs take about 2 to 3 hours (GitHub stops a job at 6). It shares a queue with the
+schedule, so scheduled runs wait until it ends, then carry on from where it left them. Same as `MODE=sweep`
+(`GAP_SECONDS`, default 60).
+
 ## Search lists
 
 Two tables in Supabase say what to search; edit them in the table editor. `seed.sql` (run it once in the SQL editor,
@@ -176,6 +183,7 @@ pip install -r requirements.txt
 cp .env.example .env              # optional: settings for local runs (gitignored)
 SEARCH_TERM="data engineer" EXPERIENCE="entry level" python scrape.py     # writes out/, open out/report.html
 MODE=plan-only DATABASE_URL=... python scrape.py                           # what the schedule would search next
+MODE=plan-only PLAN_ALL=true DATABASE_URL=... python scrape.py             # what a full sweep would search
 pytest tests
 ```
 

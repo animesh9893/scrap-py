@@ -19,9 +19,9 @@ def loc(id, name, **extra):
     return {**base, **extra}
 
 
-def build(keywords, locations, sources=("linkedin",), tried=None, ok=None, max_tasks=10):
+def build(keywords, locations, sources=("linkedin",), tried=None, ok=None, max_tasks=10, due_only=True):
     return planner.build(keywords, locations, list(sources), tried or {}, ok or {}, DEFAULTS, NOW,
-                         default_interval_hours=2, max_tasks=max_tasks)
+                         default_interval_hours=2, max_tasks=max_tasks, due_only=due_only)
 
 
 def names(planned):
@@ -61,3 +61,14 @@ def test_budget_and_keyword_settings():
     s = planned[0].search
     assert (s.exclude, s.results, s.scan_limit, s.category) == (("senior",), 50, 250, "frontend")
     assert (s.keyword_id, s.location_id, s.where) == (1, 1, "Bengaluru, Karnataka, India")
+
+
+def test_sweep_takes_every_pair_with_the_full_lookback():
+    keywords = [kw(1, "react", excluded_location_ids=[2]), kw(2, "java", hours_old=48)]
+    tried = {("linkedin", 1, 1): NOW - timedelta(minutes=30), ("linkedin", 2, 1): NOW - timedelta(minutes=5)}
+    ok = dict(tried)
+    planned, due = build(keywords, [loc(1, "Pune"), loc(2, "Noida")], tried=tried, ok=ok, due_only=False)
+    assert sorted(names(planned)) == ["java in Noida", "java in Pune", "react in Pune"]   # exclusions still apply
+    assert {p.search.name: p.search.hours_old for p in planned} == {
+        "react in Pune": 24, "java in Pune": 48, "java in Noida": 48}
+    assert due == 3

@@ -16,6 +16,7 @@ the site's views, Telegram alerts and LinkedIn posts read them like any other jo
 """
 
 import json
+import logging
 import os
 import re
 
@@ -24,6 +25,8 @@ import psycopg
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql")]   # the old project's tables, then ours
 BATCH = 200      # jobs per upsert_jobs() call
+
+log = logging.getLogger(__name__)
 
 
 def detect_category(title):
@@ -60,6 +63,20 @@ def connect(url):
             with open(path, encoding="utf-8") as f:
                 conn.execute(f.read())
     return conn
+
+
+def alive(conn, url):
+    """conn, or a new connection when it has dropped."""
+    try:
+        conn.execute("SELECT 1")
+        return conn
+    except psycopg.OperationalError:
+        log.warning("Database connection dropped: reconnecting")
+        try:
+            conn.close()
+        except Exception:
+            pass
+        return connect(url)
 
 
 def known_job_ids(conn, source, days):
