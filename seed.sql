@@ -1,6 +1,11 @@
 -- Starting search lists. Run once in Supabase's SQL editor after the first scrap-py run (which creates the tables
--- from schema.sql), then edit the rows there: is_active, priority, interval_hours, the exclusions. Rows that already
+-- from base.sql and schema.sql), then edit the rows there: is_active, priority, interval_hours, the exclusions. Rows that already
 -- exist (same keyword / location, any case) are left as they are.
+
+-- The site's tabs (search_keywords.category points here), as the old project seeded them.
+INSERT INTO categories (slug, label, sort_order) VALUES
+    ('frontend', 'Frontend', 10), ('backend', 'Backend', 20), ('fullstack', 'Full stack', 30), ('mobile', 'Mobile', 40)
+ON CONFLICT DO NOTHING;
 
 INSERT INTO search_keywords (keyword, kind, category, priority) VALUES
     ('frontend developer',   'title', 'frontend',  100),

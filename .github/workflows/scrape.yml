@@ -58,7 +58,7 @@ on:
     - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
   push:
     branches: [main]
-    paths: ['*.py', 'sources/**', 'schema.sql', 'requirements.txt', '.github/workflows/scrape.yml']
+    paths: ['*.py', 'sources/**', '*.sql', 'requirements.txt', '.github/workflows/scrape.yml']
 
 concurrency:
   group: scrape

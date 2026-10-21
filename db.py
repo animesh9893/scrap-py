@@ -1,6 +1,7 @@
 """Saves scrapes to the Supabase database the old job-scraper (Node) built, over DATABASE_URL (Postgres).
 
-  connect()        opens it and applies schema.sql (additive, safe to repeat)
+  connect()        opens it and applies base.sql (the old project's tables, for a fresh database) and schema.sql
+                   (additive), both safe to repeat
   known_job_ids()  ids of jobs saved and seen lately, whose job pages a scrape can skip
   ensure_search()  for a search from the environment: its search_keywords / locations rows (added inactive, so a
                    one-off search doesn't join the schedule)
@@ -20,7 +21,8 @@ import re
 
 import psycopg
 
-SCHEMA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "schema.sql")
+HERE = os.path.dirname(os.path.abspath(__file__))
+SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql")]   # the old project's tables, then ours
 BATCH = 200      # jobs per upsert_jobs() call
 
 
@@ -53,8 +55,10 @@ def connect(url):
     # Supabase requires TLS; set DATABASE_SSL=false for a local Postgres without it.
     sslmode = "disable" if os.environ.get("DATABASE_SSL") == "false" else "require"
     conn = psycopg.connect(url, sslmode=sslmode, autocommit=True)   # each save is its own transaction()
-    with open(SCHEMA, encoding="utf-8") as f, conn.transaction():
-        conn.execute(f.read())
+    with conn.transaction():
+        for path in SCHEMA:
+            with open(path, encoding="utf-8") as f:
+                conn.execute(f.read())
     return conn
 
 

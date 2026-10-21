@@ -1,4 +1,4 @@
-"""db.py and planner.plan() against a real Postgres that has the old job-scraper's schema (its src/db.js SCHEMA).
+"""db.py and planner.plan() against a real Postgres (an empty one is fine: db.connect() creates the tables).
 Skipped unless TEST_DATABASE_URL is set; the test empties the tables it uses, so never point it at Supabase."""
 
 import os
@@ -20,7 +20,7 @@ def conn(monkeypatch):
     monkeypatch.setenv("DATABASE_SSL", "false")
     conn = db.connect(URL)
     conn.execute("TRUNCATE jobs, runs, companies, job_search_hits, search_keywords, locations CASCADE")
-    with open(os.path.join(os.path.dirname(db.SCHEMA), "seed.sql"), encoding="utf-8") as f:
+    with open(os.path.join(db.HERE, "seed.sql"), encoding="utf-8") as f:
         conn.execute(f.read())
     yield conn
     conn.close()
