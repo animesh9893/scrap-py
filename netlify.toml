@@ -1,0 +1,4 @@
+# Netlify serves web/ as the site (no build step) and netlify/functions/ at /api/* (each function sets its path).
+[build]
+  publish = "web"
+  functions = "netlify/functions"
