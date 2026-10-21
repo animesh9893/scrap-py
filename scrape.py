@@ -7,6 +7,7 @@ uploads as the run's artifact:
   jobs.csv     the same rows, raw as a JSON string, for Excel / Sheets / COPY
   jobs.md      a Markdown table of the jobs (also shown on the run page)
   report.html  a self-contained page: search box, one card per job, expandable descriptions
+With DATABASE_URL set, the jobs are also saved to Supabase (db.py).
 
 Filters. LinkedIn's logged-out search only applies some of them, so the rest are checked on each job's own page:
   by LinkedIn   SEARCH_TERM, LOCATION, DISTANCE, HOURS_OLD, COMPANY_IDS, EASY_APPLY
@@ -99,6 +100,12 @@ EXCLUDE      = env_list("EXCLUDE", [])          # drop jobs with any of these wo
 SCAN_LIMIT   = env_int("SCAN_LIMIT", RESULTS * 5)   # stop after looking at this many jobs (each is one request)
 PROXIES      = env_list("PROXIES", [])          # e.g. user:pass@host:port,host2:port (a repo secret)
 OUT_DIR      = env("OUT_DIR", "out")
+
+DATABASE_URL = env("DATABASE_URL", None)        # Supabase Postgres; unset = files only (see db.py)
+DRY_RUN      = env_bool("DRY_RUN", False)       # true: files only, even with DATABASE_URL set
+CATEGORY     = env("CATEGORY", None)            # categories.slug for the jobs found (frontend, backend, …); default
+                                                # the keyword's category in search_keywords, else from the title
+EXPIRE_DAYS  = env_int("EXPIRE_DAYS", 7)        # jobs not seen for this many days are marked closed
 # ----------------------------------------------------------------
 
 log = logging.getLogger(__name__)
@@ -700,6 +707,20 @@ def main():
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write(md)
+
+    saved = None
+    if DATABASE_URL and not DRY_RUN:
+        import db     # psycopg is only needed when saving
+        saved = db.save(DATABASE_URL, source="linkedin", search_term=SEARCH_TERM, location=LOCATION,
+                        search_name=SEARCH_NAME, category=CATEGORY, rows=rows, meta=meta, expire_days=EXPIRE_DAYS)
+        line = (f"Saved to Supabase: {saved['new']} new, {saved['updated']} seen before; linked {saved['linked']} to "
+                f"companies, closed {saved['closed']} not seen for {EXPIRE_DAYS} days (run {saved['run_id']}).")
+        print(f"\n💾 {line}")
+        if os.environ.get("GITHUB_STEP_SUMMARY"):
+            with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                f.write(f"\n{line}\n")
+    elif not DATABASE_URL:
+        print("\nDATABASE_URL isn't set: files only, nothing saved to Supabase")
 
     print(f"\n🎯 {len(rows)} jobs (looked at {scraper.scanned}, skipped {dict(scraper.skipped) or 'none'})")
     for r in rows:

@@ -26,6 +26,40 @@ Accept: application/vnd.github+json
 {"ref": "main", "inputs": {"search_term": "data engineer", "location": "Pune", "experience": "entry level, associate"}}
 ```
 
+## Saving to Supabase
+
+With a `DATABASE_URL` repo secret (the Supabase Postgres connection string: Project settings → Database → Connection
+string → URI, session pooler), every run saves its jobs to the database the old job-scraper built, so the site,
+Telegram alerts and LinkedIn posts pick them up like any other job. `db.py` does it in one transaction:
+
+1. Applies `schema.sql`: only additions (new tables, columns and functions, below), safe to run every time.
+2. Records the search: the search term in `search_keywords`, the location in `locations` (added the first time).
+3. Upserts the jobs with `upsert_jobs()` on `(source, job_id)`. New jobs get the table defaults (`status` new,
+   `first_seen_at`); a job seen before gets its scraped fields refreshed (kept when this scrape didn't get them) and
+   `last_seen_at` bumped, keeps its `status`, tags, first category and `search_name`, and becomes `remote` if any
+   search finds it remote. `workplace` is stored as the old pipeline did: `remote`, `hybrid` or null.
+4. Records which search found each job in `job_search_hits`, and the run in `runs` (actor `scrap-py`).
+5. Links jobs to companies with the old `link_companies()` (adds companies seen for the first time).
+6. Closes jobs not seen for `EXPIRE_DAYS` (default 7) with `expire_jobs()`: sets `jobs.closed_at`.
+
+`category` (the site's tabs) comes from the `category` input, else the keyword's category in `search_keywords`, else
+the title, as the old pipeline did. Runs started by a push, with **save** unticked or with `DRY_RUN=true` only write
+the files.
+
+| Added by `schema.sql` | For |
+| --- | --- |
+| `sources` | job platforms (`linkedin` now) |
+| `search_keywords` | what to search: keyword, kind, category, `excluded_location_ids`, `excluded_sources`, per-keyword filters, priority |
+| `locations` | where to search: name, aliases, `source_params` (each platform's name for it), `excluded_sources` |
+| `job_search_hits` | which keyword × location found each job |
+| `jobs.closed_at` | when the job stopped being seen |
+| `runs.source`, `keyword_id`, `location_id`, `details` | what a scrap-py run searched, and its meta |
+| `upsert_jobs(jsonb)`, `expire_jobs(days)` | the save and the expirer |
+| `company_stats` | per company: open jobs, jobs this week / month, latest job |
+
+Tagging, Telegram alerts and LinkedIn posts are still the old project's Node steps; they read the jobs from the
+database, so they work on what this saves.
+
 ## Filters
 
 LinkedIn's logged-out search applies only some filters itself. The scraper checks the others on each job, and keeps
@@ -85,7 +119,7 @@ are left out of the rows, so an upsert keeps their values.
 ## Settings
 
 Workflow inputs map to environment variables read by `scrape.py` (`SEARCH_TERM`, `LOCATION`, `HOURS_OLD`,
-`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`). `SEARCH_NAME`, `DISTANCE` (miles,
+`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`, `CATEGORY`, `DRY_RUN`). `DATABASE_URL`, `EXPIRE_DAYS`, `SEARCH_NAME`, `DISTANCE` (miles,
 default 50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
 (empty results, 429s), add a repo secret `PROXIES` with comma-separated `user:pass@host:port` proxies. Requests
 LinkedIn rate-limits (429) or fails (5xx) are retried twice, after 5 and 15 seconds, before a page is given up on.

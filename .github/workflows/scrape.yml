@@ -41,11 +41,18 @@ on:
         type: choice
         options: [recent, relevant]
         default: recent
+      category:
+        description: 'Category for the jobs found (frontend, backend, fullstack, mobile); empty = from the keyword or title'
+        default: ''
+      save:
+        description: 'Save the jobs to Supabase (needs the DATABASE_URL secret)'
+        type: boolean
+        default: true
   schedule:
     - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
   push:
     branches: [main]
-    paths: ['scrape.py', 'requirements.txt', '.github/workflows/scrape.yml']
+    paths: ['scrape.py', 'db.py', 'schema.sql', 'requirements.txt', '.github/workflows/scrape.yml']
 
 concurrency:
   group: scrape
@@ -81,7 +88,10 @@ jobs:
           COMPANY_IDS: ${{ inputs.company_ids }}
           EASY_APPLY: ${{ inputs.easy_apply }}
           SORT: ${{ inputs.sort }}
+          CATEGORY: ${{ inputs.category }}
+          DRY_RUN: ${{ github.event_name == 'push' || inputs.save == false }}   # a push only tests the scraper
           PROXIES: ${{ secrets.PROXIES }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
