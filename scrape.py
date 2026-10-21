@@ -2,8 +2,9 @@
 
 Runs on GitHub Actions (.github/workflows/scrape.yml) and writes to OUT_DIR (default out/), which the workflow
 uploads as the run's artifact:
-  jobs.json    {"meta": search, filters, counts, errors; "jobs": [...]}: the data, for scripts / n8n
-  jobs.csv     the same jobs, one row each (description as Markdown), for Excel / Sheets
+  jobs.json    {"meta": search, filters, counts, errors; "jobs": [rows]}: one row per job, shaped like the
+               public.jobs table (see ROW_FIELDS), ready to upsert on (source, job_id)
+  jobs.csv     the same rows, raw as a JSON string, for Excel / Sheets / COPY
   jobs.md      a Markdown table of the jobs (also shown on the run page)
   report.html  a self-contained page: search box, one card per job, expandable descriptions
 
@@ -29,11 +30,13 @@ import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup
 from jobspy.linkedin import LinkedIn
+from jobspy.linkedin.util import criteria
 from jobspy.model import DescriptionFormat, ScraperInput
-from jobspy.util import description_fields
+from jobspy.util import check_status, description_fields, get_enum_from_job_type
 
 
 def env(name, default):
@@ -63,6 +66,7 @@ def env_int(name, default):
 # ---------------------------- CONFIG ----------------------------
 SEARCH_TERM  = env("SEARCH_TERM", "software engineer")
 LOCATION     = env("LOCATION", "Bengaluru")
+SEARCH_NAME  = env("SEARCH_NAME", f"{SEARCH_TERM} in {LOCATION}")   # stored in each row's search_name
 DISTANCE     = env_int("DISTANCE", 50)          # miles around LOCATION
 HOURS_OLD    = env_int("HOURS_OLD", 24)         # only jobs posted in the last N hours; 0 = any time
 RESULTS      = env_int("RESULTS", 30)           # jobs to keep, after filtering
@@ -131,11 +135,13 @@ class Skip(Exception):
 
 STOP = "scan limit reached"
 DETAIL_DELAY = (0.5, 1.5)    # seconds between job pages; back to back, LinkedIn starts answering 429
+DETAIL_RETRIES = (5, 15)     # seconds to wait before each retry of a job page that failed (usually a 429)
 
 
 # ============ 1. Scrape ============
 class FilteredLinkedIn(LinkedIn):
-    """JobSpy's LinkedIn scraper, plus the filters LinkedIn ignores for logged-out searches.
+    """JobSpy's LinkedIn scraper, plus the filters LinkedIn ignores for logged-out searches and the job-page fields
+    JobSpy leaves out.
 
     JobSpy's search loop skips a job when _process_job raises and keeps paging until it has results_wanted jobs, so
     the filters raise Skip and the run still ends up with RESULTS matching jobs (or stops at SCAN_LIMIT).
@@ -147,12 +153,57 @@ class FilteredLinkedIn(LinkedIn):
         self.hit_scan_limit = False
         self.skipped = Counter()
         self.posted_ago = {}
+        self.page_extras = {}      # job id -> what _fetch_details reads beyond JobSpy's fields
         self.oldest = (datetime.now(timezone.utc) - timedelta(hours=HOURS_OLD, days=1)).date() if HOURS_OLD else None
         self.log.addFilter(lambda rec: rec.getMessage() != f"skipping job: {STOP}")   # said once, below
 
     def _fetch_details(self, job_id):
+        """The job page: JobSpy's fields (description, pay, type, seniority, function, industries, logo), plus the
+        applicant count, LinkedIn's pay text and how to apply. Empty when the page can't be read."""
         time.sleep(random.uniform(*DETAIL_DELAY))
-        return super()._fetch_details(job_id)
+        for wait in DETAIL_RETRIES + (None,):
+            try:
+                response = self.session.get(f"{self.base_url}/jobs/view/{job_id}")
+                check_status(response)
+                break
+            except Exception as e:
+                if wait is None:
+                    self.log.warning(f"job {job_id}: {e}, giving up on its page")
+                    return {}
+                self.log.warning(f"job {job_id}: {e}, retrying in {wait}s")
+                time.sleep(wait)
+        if not urlparse(response.url).path.startswith("/jobs/view/"):
+            self.log.warning(f"job {job_id}: redirected to {urlparse(response.url).path}")
+            return {}
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        markup = soup.find("div", class_="show-more-less-html__markup")
+        if markup:
+            markup.attrs.clear()
+        employment_type = criteria(soup, "Employment type")
+        job_type = get_enum_from_job_type(employment_type.lower().replace("-", "")) if employment_type else None
+        seniority = criteria(soup, "Seniority level")
+        salary_tag = soup.find("div", class_="compensation__salary")
+        pay = self._parse_salary(salary_tag.get_text() if salary_tag else "")
+        logo = soup.find("img", class_="artdeco-entity-image")
+        applicants = soup.find(class_="num-applicants__caption")
+        controls = {tag["data-tracking-control-name"] for tag in soup.find_all(attrs={"data-tracking-control-name": True})}
+        self.page_extras[f"li-{job_id}"] = {
+            "salary_text": " ".join(salary_tag.get_text(" ", strip=True).split()) if salary_tag else None,
+            "applicants_text": applicants.get_text(" ", strip=True) if applicants else None,
+            "apply_type": "easy_apply" if "public_jobs_apply-link-onsite" in controls else
+                          "company_site" if any(c.startswith("public_jobs_apply-link-offsite") for c in controls) else None,
+        }
+        return {
+            **description_fields(markup.prettify(formatter="html") if markup else None, DescriptionFormat.HTML),
+            **pay.model_dump(),
+            "salary_source": "linkedin" if pay.min_amount else None,
+            "job_type": [job_type] if job_type else None,
+            "job_level": seniority.lower() if seniority else None,
+            "job_function": criteria(soup, "Job function"),
+            "company_industry": criteria(soup, "Industries"),
+            "company_logo": logo.get("data-delayed-url") if logo else None,
+        }
 
     def _skip(self, reason, message):
         self.skipped[reason] += 1
@@ -202,7 +253,7 @@ def scrape():
     return scraper, jobs
 
 
-# ============ 2. Clean records ============
+# ============ 2. Rows ============
 JOB_TYPES = {"fulltime": "Full-time", "parttime": "Part-time", "contract": "Contract", "temporary": "Temporary",
              "internship": "Internship", "volunteer": "Volunteer"}
 SAFE_TAGS = {"p", "br", "ul", "ol", "li", "strong", "b", "em", "i", "u", "a", "blockquote",
@@ -240,40 +291,162 @@ def to_markdown(description_html):
     return re.sub(r"\n{3,}", "\n\n", "\n".join(line if line.strip() else "" for line in lines)).strip()
 
 
-def record(job, posted_ago):
+# Description headings -> section, first match wins ("Minimum qualifications" is a qualification, not a requirement)
+SECTIONS = [
+    ("responsibilities", r"responsib|what you('|’)?ll do|what you will do|duties|day[- ]to[- ]day|key result"),
+    ("qualifications",   r"qualification|education|eligib"),
+    ("requirements",     r"requir|must[- ]have|skill|what you need|what we('|’)?re looking for|looking for|"
+                         r"who you are|what you bring|you have|you('|’)?ll need|experience|expertise"),
+    ("benefits",         r"benefit|perks|what we offer|we offer|why join|why you('|’)?ll (love|thrive)|compensation|rewards"),
+    ("summary",          r"job description|about the (job|role|position)|role (overview|purpose|summary)|the role|"
+                         r"your role|job (summary|purpose|overview)|position (summary|overview)"),
+    ("about_company",    r"about (us|the company|the team)|about [A-Z]|who we are|company (description|overview)|"
+                         r"our mission|our story"),
+]
+
+
+def section_of(heading):
+    return next((key for key, pattern in SECTIONS if re.search(pattern, heading, re.I)), None)
+
+
+def split_sections(markdown_text):
+    """Summary, responsibilities, requirements, qualifications, benefits and about-the-company, cut out of the
+    description at its bold / # headings. Best effort: postings with no headings give {}."""
+    if not markdown_text:
+        return {}
+    # A bold heading inside a line ("... **Required Skills** Python, ...") -> its own line, when it names a section
+    text = re.sub(r"[ \t]*\*\*([^*\n]{3,60}?)\*\*[ \t]*:?[ \t]*",
+                  lambda m: f"\n**{m[1]}**\n" if section_of(m[1].strip(" :")) or m[1].endswith(":") else m[0],
+                  markdown_text)
+    sections, current = {}, None
+    for line in text.splitlines():
+        heading = re.fullmatch(r"\s*(?:#{1,6}\s+(.{3,80})|\*\*(.{3,80}?)\*\*\s*:?)\s*", line)
+        if heading:
+            name = (heading[1] or heading[2]).strip(" :*")
+            current = section_of(name)
+            if current:
+                sections.setdefault(current, []).append(f"**{name}**")
+            continue
+        if current:
+            sections[current].append(line)
+    return {key: re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() for key, lines in sections.items()}
+
+
+def experience_years(text):
+    """The first "4-6 years" / "5+ years" / "2.00 + years" in the text -> {"min": 4, "max": 6}; None if there is none."""
+    match = re.search(r"(?<![\d.])(\d{1,2})(?:\.\d+)?\s*\+?\s*(?:(?:-|–|to)\s*(\d{1,2})(?:\.\d+)?\s*\+?\s*)?(?:years|yrs)\b",
+                      text or "", re.I)
+    return {"min": int(match[1]), "max": int(match[2]) if match[2] else None} if match else None
+
+
+WORKPLACES = [("Hybrid", r"\bhybrid\b"), ("Remote", r"\bremote\b|work from home|\bwfh\b"),
+              ("On-site", r"\bon-?site\b|\bin[- ]office\b|work from office|\bwfo\b")]
+WORKPLACE_WORDS = r"hybrid|remote|on-?site|in-office|wfh|wfo|work from (?:home|office)"
+# Where a description states the workplace: a labelled line ("Work mode: Hybrid", "Location: Bangalore (Onsite)"),
+# a parenthesis ("(Hybrid, Bangalore)"), or a plain statement ("we embrace a hybrid working environment").
+# Generic mentions ("remote, hybrid and office-based models", "hybrid cloud") don't count.
+WORKPLACE_CLUES = [
+    r"\b(?:work(?:ing)?\s*(?:mode|model|place|style|type|location|arrangement|setup)|opportunity type|location type|"
+    r"job mode|employment mode|job location|location)\W{0,3}\s*[:\-–]\s*([^\n]{0,60})",
+    rf"\(([^()\n]{{0,30}}\b(?:{WORKPLACE_WORDS})\b[^()\n]{{0,30}})\)",
+    r"\b(hybrid (?:work|working)\b|\d days? (?:a week )?(?:in|from) (?:the )?office|(?:fully|100%) remote|"
+    r"(?:this is a |a )remote (?:role|position|job|opportunity))",
+]
+
+
+def find_workplace(title, location, description):
+    """Remote / Hybrid / On-site when the posting says so: in the title or location, else where the description
+    states it (WORKPLACE_CLUES). LinkedIn doesn't show its own workplace field to logged-out visitors."""
+    clues = [(f"{title} {location}", "title_or_location")]
+    for pattern in WORKPLACE_CLUES:
+        clues += [(m[1], "description") for m in re.finditer(pattern, description or "", re.I)]
+    for text, source in clues:
+        if re.search(r"\d days? (?:a week )?(?:in|from) (?:the )?office", text, re.I):
+            return "Hybrid", source
+        for workplace, pattern in WORKPLACES:
+            if re.search(pattern, text, re.I):
+                return workplace, source
+    return None, None
+
+
+def company_slug(company_url):
+    match = re.search(r"/company/([^/?#]+)", company_url or "")
+    return match[1].lower() if match else None
+
+
+def posted_at(posted_ago, posted_date, scraped_at):
+    """A UTC timestamp from "51 minutes ago" / "5 hours ago" (to the minute / hour); LinkedIn only gives the date for
+    anything a day or older. Returns (posted_at, precision)."""
+    hours = age_hours(posted_ago)
+    if hours is not None and hours < 24:
+        precise = "minute" if "minute" in (posted_ago or "") or hours == 0 else "hour"
+        return (scraped_at - timedelta(hours=hours)).isoformat(timespec="minutes"), precise
+    return (posted_date.isoformat() if posted_date else None), ("day" if posted_date else None)
+
+
+def applicant_count(text):
+    """ "102 applicants" -> 102, "Over 200 applicants" -> 200; None for "Be among the first 25 applicants"."""
+    match = re.fullmatch(r"(?:over\s+)?([\d,]+)\s+applicants?", (text or "").strip(), re.I)
+    return int(match[1].replace(",", "")) if match else None
+
+
+# The public.jobs columns the scraper fills. status, first_seen_at (table defaults) and category, role, level, tags,
+# tagged_at (set by tagging, later) are left out, so an upsert on (source, job_id) doesn't overwrite them.
+ROW_FIELDS = ["source", "job_id", "title", "company", "company_url", "company_slug", "location", "workplace", "url",
+              "apply_url", "posted_at", "employment_type", "seniority", "salary", "description", "search_name", "raw",
+              "last_seen_at"]
+
+
+def row(job, posted_ago, extras, scraped_at):
     description_html = clean_html(job.description)
+    description = to_markdown(description_html)
+    location = job.location.display_location() if job.location else None
+    workplace, workplace_source = find_workplace(job.title, location, description)
+    when, precision = posted_at(posted_ago, job.date_posted, scraped_at)
+    sections = split_sections(description)
+    asks = "\n".join(sections.get(key, "") for key in ("requirements", "qualifications"))
+    apply_type = extras.get("apply_type")
     return {
-        "id": (job.id or "").removeprefix("li-"),
+        "source": "linkedin",
+        "job_id": (job.id or "").removeprefix("li-"),
         "title": job.title,
         "company": job.company,
-        "location": job.location.display_location() if job.location else None,
-        "posted_date": job.date_posted.isoformat() if job.date_posted else None,
-        "posted_ago": posted_ago,
+        "company_url": job.company_url,
+        "company_slug": company_slug(job.company_url),
+        "location": location,
+        "workplace": workplace,
+        "url": job.job_url,
+        "apply_url": job.job_url if apply_type == "easy_apply" else None,   # company-site links are behind sign-in
+        "posted_at": when,
         "employment_type": ", ".join(JOB_TYPES.get(t.value, t.value) for t in job.job_type or []) or None,
         "seniority": job.job_level.capitalize() if job.job_level else None,
-        "job_function": job.job_function,
-        "industries": job.company_industry,
-        "salary_min": job.min_amount,
-        "salary_max": job.max_amount,
-        "salary_currency": job.currency,
-        "salary_interval": job.interval.value if job.interval else None,
-        "salary_source": (job.salary_source or "linkedin") if job.min_amount else None,
-        "emails": job.emails or [],
-        "url": job.job_url,
-        "company_url": job.company_url,
-        "company_logo": job.company_logo,
-        "description": to_markdown(description_html),
-        "description_html": description_html,
+        "salary": extras.get("salary_text"),
+        "description": description,
+        "search_name": SEARCH_NAME,
+        "raw": {
+            "page_read": bool(extras),                 # false: the job page failed, only the search card's fields
+            "posted_ago": posted_ago,
+            "posted_date": job.date_posted.isoformat() if job.date_posted else None,
+            "posted_at_precision": precision,
+            "applicants": applicant_count(extras.get("applicants_text")),
+            "applicants_text": extras.get("applicants_text"),
+            "apply_type": apply_type,                  # easy_apply | company_site
+            "salary_min": job.min_amount,
+            "salary_max": job.max_amount,
+            "salary_currency": job.currency,
+            "salary_interval": job.interval.value if job.interval else None,
+            "job_function": job.job_function,
+            "industries": job.company_industry,
+            "workplace_source": workplace_source,      # title_or_location | description
+            "experience_years": experience_years(asks) or experience_years(description),
+            "sections": sections,
+            "emails": job.emails or [],
+            "company_logo": job.company_logo,
+            "description_html": description_html,
+            "search": dict(search_term=SEARCH_TERM, location=LOCATION, distance=DISTANCE, hours_old=HOURS_OLD),
+        },
+        "last_seen_at": scraped_at.isoformat(timespec="seconds"),
     }
-
-
-def salary_text(job):
-    if not job["salary_min"]:
-        return None
-    low, high = f"{job['salary_min']:,.0f}", f"{job['salary_max']:,.0f}" if job["salary_max"] else None
-    amount = f"{low}–{high}" if high and high != low else low
-    per = {"yearly": "yr", "monthly": "mo", "weekly": "wk", "daily": "day", "hourly": "hr"}.get(job["salary_interval"])
-    return f"{job['salary_currency'] or ''} {amount}{f' / {per}' if per else ''}".strip()
 
 
 def search_text(meta):
@@ -287,38 +460,40 @@ def search_text(meta):
     return " · ".join(parts)
 
 
+def skipped_text(meta):
+    counts = meta["counts"]
+    text = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in counts["skipped"].items())
+    return f"skipped {text}" if text else ""
+
+
 # ============ 3. Write ============
-def write_json(meta, jobs):
+def write_json(meta, rows):
     with open(os.path.join(OUT_DIR, "jobs.json"), "w", encoding="utf-8") as f:
-        json.dump({"meta": meta, "jobs": jobs}, f, indent=1, ensure_ascii=False)
+        json.dump({"meta": meta, "jobs": rows}, f, indent=1, ensure_ascii=False)
 
 
-CSV_FIELDS = ["id", "title", "company", "location", "posted_date", "posted_ago", "employment_type", "seniority",
-              "job_function", "industries", "salary_min", "salary_max", "salary_currency", "salary_interval",
-              "salary_source", "emails", "url", "company_url", "company_logo", "description"]   # no description_html
-
-
-def write_csv(jobs):
+def write_csv(rows):
     with open(os.path.join(OUT_DIR, "jobs.csv"), "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=CSV_FIELDS, extrasaction="ignore")
+        writer = csv.DictWriter(f, fieldnames=ROW_FIELDS)
         writer.writeheader()
-        writer.writerows({**j, "emails": ", ".join(j["emails"])} for j in jobs)
+        writer.writerows({**r, "raw": json.dumps(r["raw"], ensure_ascii=False)} for r in rows)
 
 
-def markdown(meta, jobs):
+def markdown(meta, rows):
     cell = lambda v: str(v or "").replace("|", "\\|").replace("\n", " ")
-    lines = [f"### {len(jobs)} LinkedIn jobs: {meta['search']['search_term']!r} in {meta['search']['location']!r}",
+    lines = [f"### {len(rows)} LinkedIn jobs: {meta['search']['search_term']!r} in {meta['search']['location']!r}",
              "", search_text(meta), ""]
-    if jobs:
-        lines += ["| Job | Company | Location | Posted | Type | Seniority | Salary |",
-                  "| --- | --- | --- | --- | --- | --- | --- |"]
-        lines += [f"| [{cell(j['title'])}]({j['url']}) | {cell(j['company'])} | {cell(j['location'])} | "
-                  f"{cell(j['posted_ago'] or j['posted_date'])} | {cell(j['employment_type'])} | "
-                  f"{cell(j['seniority'])} | {cell(salary_text(j))} |" for j in jobs]
+    if rows:
+        lines += ["| Job | Company | Location | Workplace | Posted | Type | Seniority | Salary | Applicants |",
+                  "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+        lines += [f"| [{cell(r['title'])}]({r['url']}) | {cell(r['company'])} | {cell(r['location'])} | "
+                  f"{cell(r['workplace'])} | {cell(r['raw']['posted_ago'] or r['posted_at'])} | "
+                  f"{cell(r['employment_type'])} | {cell(r['seniority'])} | {cell(r['salary'])} | "
+                  f"{cell(r['raw']['applicants_text'])} |" for r in rows]
     counts = meta["counts"]
     lines += ["", f"Looked at {counts['scanned']} jobs, kept {counts['kept']}."]
-    if counts["skipped"]:
-        lines[-1] += " Skipped: " + ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in counts["skipped"].items()) + "."
+    if skipped_text(meta):
+        lines[-1] += f" {skipped_text(meta).capitalize()}."
     if counts["stopped_at_scan_limit"]:
         lines[-1] += f" Stopped at the scan limit ({SCAN_LIMIT}); loosen the filters or raise SCAN_LIMIT for more."
     if meta["error"]:
@@ -326,31 +501,47 @@ def markdown(meta, jobs):
     return "\n".join(lines) + "\n"
 
 
-def report_html(meta, jobs):
+SECTION_LABELS = {"requirements": "Requirements", "qualifications": "Qualifications"}
+
+
+def bold(escaped_markdown):
+    """**text** -> <b>text</b> in already-escaped Markdown (the report shows sections as text, not rendered HTML)."""
+    return re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", escaped_markdown)
+
+
+def report_html(meta, rows):
     e = lambda v: html.escape(str(v or ""))
     cards = []
-    for j in jobs:
-        chips = [c for c in (j["employment_type"], j["seniority"], salary_text(j), j["industries"])
+    for r in rows:
+        raw = r["raw"]
+        chips = [c for c in (r["workplace"], r["employment_type"], r["seniority"], r["salary"], raw["industries"])
                  if c and c != "Not applicable"]
-        text = " ".join(str(j[k] or "") for k in ("title", "company", "location", "employment_type", "seniority",
-                                                    "job_function", "industries")).lower()
-        logo = f'<img class="logo" src="{e(j["company_logo"])}" alt="" loading="lazy">' if j["company_logo"] else \
-               f'<div class="logo">{e((j["company"] or "?")[:1])}</div>'
-        company = f'<a href="{e(j["company_url"])}" target="_blank" rel="noopener">{e(j["company"])}</a>' \
-                  if j["company_url"] else e(j["company"])
-        desc = f'<details><summary>Description</summary><div class="desc">{j["description_html"]}</div></details>' \
-               if j["description_html"] else '<p class="muted">No description (job page not readable).</p>'
+        text = " ".join(str(v or "") for v in (r["title"], r["company"], r["location"], r["workplace"],
+                                               r["employment_type"], r["seniority"], raw["industries"])).lower()
+        logo = f'<img class="logo" src="{e(raw["company_logo"])}" alt="" loading="lazy">' if raw["company_logo"] else \
+               f'<div class="logo">{e((r["company"] or "?")[:1])}</div>'
+        company = f'<a href="{e(r["company_url"])}" target="_blank" rel="noopener">{e(r["company"])}</a>' \
+                  if r["company_url"] else e(r["company"])
+        facts = [raw["applicants_text"], {"easy_apply": "Easy Apply", "company_site": "Apply on company site"}.get(raw["apply_type"])]
+        if raw["experience_years"]:
+            years = raw["experience_years"]
+            facts.append(f"{years['min']}–{years['max']} yrs experience" if years["max"] else f"{years['min']}+ yrs experience")
+        sections = "".join(f'<div class="md">{bold(e(body))}</div>'
+                           for key, body in raw["sections"].items() if key in SECTION_LABELS)   # body starts with its heading
+        desc = f'<details><summary>Description</summary><div class="desc">{raw["description_html"]}</div></details>' \
+               if raw["description_html"] else '<p class="muted">No description (job page not readable).</p>'
         cards.append(f"""<article class="job" data-text="{e(text)}">
   {logo}
   <div class="body">
-    <h2><a href="{e(j['url'])}" target="_blank" rel="noopener">{e(j['title'])}</a></h2>
-    <p class="meta">{company} · {e(j['location'])} · <span title="{e(j['posted_date'])}">{e(j['posted_ago'] or j['posted_date'])}</span></p>
+    <h2><a href="{e(r['url'])}" target="_blank" rel="noopener">{e(r['title'])}</a></h2>
+    <p class="meta">{company} · {e(r['location'])} · <span title="{e(r['posted_at'])}">{e(raw['posted_ago'] or r['posted_at'])}</span></p>
     <p class="chips">{''.join(f'<span>{e(c)}</span>' for c in chips)}</p>
+    <p class="facts">{' · '.join(e(f) for f in facts if f)}</p>
+    {f'<details><summary>Requirements &amp; qualifications</summary>{sections}</details>' if sections else ''}
     {desc}
   </div>
 </article>""")
     counts, s = meta["counts"], meta["search"]
-    skipped = ", ".join(f"{k.replace('_', ' ')} {v}" for k, v in counts["skipped"].items())
     error = f'<p class="error">{e(meta["error"])}</p>' if meta["error"] else ""
     if counts["stopped_at_scan_limit"]:
         error += (f'<p class="muted">Stopped at the scan limit ({SCAN_LIMIT}); loosen the filters or raise '
@@ -374,20 +565,22 @@ input {{ width:100%; margin:16px 0; padding:10px 12px; font:inherit; color:inher
 .body {{ min-width:0; flex:1; }}
 h2 {{ font-size:17px; margin:0; }} a {{ color:var(--accent); text-decoration:none; }} a:hover {{ text-decoration:underline; }}
 .meta {{ margin:2px 0 8px; color:var(--muted); }}
-.chips {{ margin:0; display:flex; flex-wrap:wrap; gap:6px; }} .chips:empty {{ display:none; }}
+.chips {{ margin:0; display:flex; flex-wrap:wrap; gap:6px; }} .chips:empty, .facts:empty {{ display:none; }}
 .chips span {{ background:var(--chip); border-radius:999px; padding:2px 10px; font-size:13px; }}
+.facts {{ margin:8px 0 0; color:var(--muted); font-size:13px; }}
 details {{ margin-top:10px; }} summary {{ cursor:pointer; color:var(--accent); }}
+.md {{ white-space:pre-wrap; overflow-wrap:anywhere; margin-top:8px; }}
 .desc {{ margin-top:8px; overflow-wrap:anywhere; }} .desc p {{ margin:0 0 .6em; }}
 .desc h1, .desc h2, .desc h3 {{ font-size:15px; }}
 </style></head>
 <body><main>
 <header>
-  <h1>{len(jobs)} LinkedIn jobs: {e(s['search_term'])} in {e(s['location'])}</h1>
+  <h1>{len(rows)} LinkedIn jobs: {e(s['search_term'])} in {e(s['location'])}</h1>
   <p class="sub">{e(search_text(meta))}</p>
-  <p class="sub">Looked at {counts['scanned']}, kept {counts['kept']}{f' · skipped {e(skipped)}' if skipped else ''} · {e(generated)}</p>
+  <p class="sub">Looked at {counts['scanned']}, kept {counts['kept']}{f' · {e(skipped_text(meta))}' if skipped_text(meta) else ''} · {e(generated)}</p>
   {error}
 </header>
-<input id="q" type="search" placeholder="Filter by title, company, location, seniority…" aria-label="Filter jobs">
+<input id="q" type="search" placeholder="Filter by title, company, location, workplace, seniority…" aria-label="Filter jobs">
 <p class="muted" id="none" hidden>No jobs match.</p>
 {chr(10).join(cards) or '<p class="muted">No jobs found.</p>'}
 </main>
@@ -413,37 +606,40 @@ def main():
           f"{f'last {HOURS_OLD}h' if HOURS_OLD else 'any time'}, {RESULTS} jobs, sorted by {SORT} ===")
 
     scraper, found = scrape()
-    jobs = [record(job, scraper.posted_ago.get(job.id)) for job in found]
+    scraped_at = datetime.now(timezone.utc)
+    rows = [row(job, scraper.posted_ago.get(job.id), scraper.page_extras.get(job.id, {}), scraped_at) for job in found]
     if SORT == "recent":
-        jobs.sort(key=lambda j: (age_hours(j["posted_ago"]) is None, age_hours(j["posted_ago"]) or 0))
+        rows.sort(key=lambda r: (age_hours(r["raw"]["posted_ago"]) is None, age_hours(r["raw"]["posted_ago"]) or 0))
     meta = {
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "generated_at": scraped_at.isoformat(timespec="seconds"),
         "source": "linkedin",
+        "search_name": SEARCH_NAME,
         "search": dict(search_term=SEARCH_TERM, location=LOCATION, distance=DISTANCE, hours_old=HOURS_OLD,
                        sort=SORT, company_ids=COMPANY_IDS, easy_apply=EASY_APPLY, proxies=bool(PROXIES)),
         "filters": dict(job_type=JOB_TYPE, experience=EXPERIENCE, exclude=EXCLUDE),
-        "counts": dict(kept=len(jobs), scanned=scraper.scanned, skipped=dict(scraper.skipped),
-                       without_description=sum(not j["description"] for j in jobs),
+        "counts": dict(kept=len(rows), scanned=scraper.scanned, skipped=dict(scraper.skipped),
+                       without_description=sum(not r["description"] for r in rows),
                        stopped_at_scan_limit=scraper.hit_scan_limit),
         "error": scraper.error,
         "warnings": scraper.warnings,
     }
 
-    write_json(meta, jobs)
-    write_csv(jobs)
-    md = markdown(meta, jobs)
+    write_json(meta, rows)
+    write_csv(rows)
+    md = markdown(meta, rows)
     with open(os.path.join(OUT_DIR, "jobs.md"), "w", encoding="utf-8") as f:
         f.write(md)
     with open(os.path.join(OUT_DIR, "report.html"), "w", encoding="utf-8") as f:
-        f.write(report_html(meta, jobs))
+        f.write(report_html(meta, rows))
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write(md)
 
-    print(f"\n🎯 {len(jobs)} jobs (looked at {scraper.scanned}, skipped {dict(scraper.skipped) or 'none'})")
-    for j in jobs:
-        print(f"  {(j['posted_ago'] or j['posted_date'] or ''):>16}  {j['title'][:55]:<55}  {(j['company'] or '')[:30]}")
-    if not jobs and scraper.error:
+    print(f"\n🎯 {len(rows)} jobs (looked at {scraper.scanned}, skipped {dict(scraper.skipped) or 'none'})")
+    for r in rows:
+        print(f"  {(r['raw']['posted_ago'] or r['posted_at'] or ''):>16}  {r['title'][:50]:<50}  "
+              f"{(r['company'] or '')[:24]:<24}  {r['salary'] or ''}")
+    if not rows and scraper.error:
         raise SystemExit(f"LinkedIn: {scraper.error}")
 
 

@@ -47,20 +47,37 @@ Each run uploads an artifact **jobs-&lt;run number&gt;** (kept 30 days), downloa
 | File | For |
 | --- | --- |
 | `report.html` | Reading: open in a browser. One card per job, a search box, expandable descriptions, light / dark |
-| `jobs.json` | Scripts / n8n: `{"meta": {search, filters, counts, error}, "jobs": [...]}` |
-| `jobs.csv` | Excel / Sheets: the same fields, one row per job (description as Markdown) |
+| `jobs.json` | Scripts / n8n / Supabase: `{"meta": {search, filters, counts, error}, "jobs": [rows]}` |
+| `jobs.csv` | Excel / Sheets / `COPY`: the same rows (`raw` as a JSON string) |
 | `jobs.md` | Pasting into Slack / Notion / GitHub: a table of the jobs. Also shown on the run page |
 
-Each job has `id`, `title`, `company`, `location`, `posted_date`, `posted_ago`, `employment_type`, `seniority`,
-`job_function`, `industries`, `salary_min` / `salary_max` / `salary_currency` / `salary_interval` / `salary_source`
-(when LinkedIn shows pay), `emails`, `url`, `company_url`, `company_logo`, `description` (Markdown) and
-`description_html` (cleaned, safe to embed; JSON only).
+### Rows (`public.jobs`)
+
+Each job is a row of the `public.jobs` table, ready to upsert on `(source, job_id)`:
+
+| Column | From LinkedIn |
+| --- | --- |
+| `source`, `job_id` | `linkedin` and the job's id |
+| `title`, `company`, `company_url`, `location`, `url` | the job |
+| `company_slug` | from `company_url` (`/company/google` → `google`) |
+| `workplace` | Remote / Hybrid / On-site, only when the posting states it (title, location, "Work mode: Hybrid", "(Onsite)", "hybrid working environment"); LinkedIn hides its own workplace field from logged-out visitors, so it's often null |
+| `apply_url` | the job's LinkedIn URL for Easy Apply jobs; null for jobs that apply on the company's site (LinkedIn only shows that link after sign-in) |
+| `posted_at` | UTC time to the minute / hour from "51 minutes ago" / "5 hours ago"; just the date for jobs a day or older |
+| `employment_type`, `seniority` | the job page's "Employment type" and "Seniority level" |
+| `salary` | LinkedIn's pay range, e.g. `₹1,400,000.00/yr - ₹2,800,000.00/yr`, when the poster gave one |
+| `description` | the full description, Markdown |
+| `search_name` | `SEARCH_NAME` (default "&lt;search term&gt; in &lt;location&gt;") |
+| `last_seen_at` | when the job was scraped |
+| `raw` | everything else: `applicants` / `applicants_text`, `apply_type` (easy_apply / company_site), `salary_min` / `max` / `currency` / `interval`, `job_function`, `industries`, `experience_years` ({min, max}), `sections` (the description cut into `summary`, `responsibilities`, `requirements`, `qualifications`, `benefits`, `about_company` at its headings; best effort), `posted_ago`, `posted_date`, `emails`, `company_logo`, `description_html` (cleaned, safe to embed), `page_read` (false when the job page failed and only the search card's fields are there), and the search |
+
+`status`, `first_seen_at` (table defaults) and `category`, `role`, `level`, `tags`, `tagged_at` (for a tagging step)
+are left out of the rows, so an upsert keeps their values.
 
 ## Settings
 
 Workflow inputs map to environment variables read by `scrape.py` (`SEARCH_TERM`, `LOCATION`, `HOURS_OLD`,
-`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`). `DISTANCE` (miles, default
-50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
+`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`). `SEARCH_NAME`, `DISTANCE` (miles,
+default 50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
 (empty results, 429s), add a repo secret `PROXIES` with comma-separated `user:pass@host:port` proxies.
 
 ## Locally
