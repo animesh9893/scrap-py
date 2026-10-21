@@ -39,6 +39,24 @@ from jobspy.model import DescriptionFormat, ScraperInput
 from jobspy.util import check_status, description_fields, get_enum_from_job_type
 
 
+def load_dotenv(path=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")):
+    """KEY=value lines from .env (next to this script) into the environment, for local runs. Variables already set
+    win, so the workflow's inputs aren't overridden. There's no .env on GitHub Actions (it's gitignored)."""
+    try:
+        with open(path, encoding="utf-8") as f:
+            lines = f.read().splitlines()
+    except FileNotFoundError:
+        return
+    for line in lines:
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, value = line.split("=", 1)
+            os.environ.setdefault(key.strip(), value.strip().strip("\"'"))
+
+
+load_dotenv()
+
+
 def env(name, default):
     value = (os.environ.get(name) or "").strip()
     return value if value else default
@@ -135,7 +153,33 @@ class Skip(Exception):
 
 STOP = "scan limit reached"
 DETAIL_DELAY = (0.5, 1.5)    # seconds between job pages; back to back, LinkedIn starts answering 429
-DETAIL_RETRIES = (5, 15)     # seconds to wait before each retry of a job page that failed (usually a 429)
+RETRY_WAITS = (5, 15)        # seconds before each retry of a request LinkedIn rate-limited (429) or failed (5xx)
+RETRY_STATUSES = {429, 500, 502, 503, 504, 999}
+
+
+class RetryingSession:
+    """JobSpy's HTTP session, with each GET that LinkedIn rate-limits or fails retried after RETRY_WAITS: search
+    pages and job pages alike (JobSpy stops the whole search at the first failed search page)."""
+
+    def __init__(self, session, log):
+        self._session, self._log = session, log
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    def get(self, url, **kwargs):
+        for wait in RETRY_WAITS + (None,):
+            try:
+                response = self._session.get(url, **kwargs)
+                if response.status_code not in RETRY_STATUSES or wait is None:
+                    return response
+                problem = f"status {response.status_code}"
+            except Exception as e:
+                if wait is None:
+                    raise
+                problem = str(e)
+            self._log.warning(f"{urlparse(url).path}: {problem}, retrying in {wait}s")
+            time.sleep(wait)
 
 
 # ============ 1. Scrape ============
@@ -157,21 +201,24 @@ class FilteredLinkedIn(LinkedIn):
         self.oldest = (datetime.now(timezone.utc) - timedelta(hours=HOURS_OLD, days=1)).date() if HOURS_OLD else None
         self.log.addFilter(lambda rec: rec.getMessage() != f"skipping job: {STOP}")   # said once, below
 
+    @property
+    def session(self):
+        return self._session
+
+    @session.setter
+    def session(self, value):              # JobSpy's scrape() sets it; every request then goes through the retries
+        self._session = RetryingSession(value, self.log)
+
     def _fetch_details(self, job_id):
         """The job page: JobSpy's fields (description, pay, type, seniority, function, industries, logo), plus the
         applicant count, LinkedIn's pay text and how to apply. Empty when the page can't be read."""
         time.sleep(random.uniform(*DETAIL_DELAY))
-        for wait in DETAIL_RETRIES + (None,):
-            try:
-                response = self.session.get(f"{self.base_url}/jobs/view/{job_id}")
-                check_status(response)
-                break
-            except Exception as e:
-                if wait is None:
-                    self.log.warning(f"job {job_id}: {e}, giving up on its page")
-                    return {}
-                self.log.warning(f"job {job_id}: {e}, retrying in {wait}s")
-                time.sleep(wait)
+        try:
+            response = self.session.get(f"{self.base_url}/jobs/view/{job_id}")
+            check_status(response)
+        except Exception as e:
+            self.log.warning(f"job {job_id}: {e}, giving up on its page")
+            return {}
         if not urlparse(response.url).path.startswith("/jobs/view/"):
             self.log.warning(f"job {job_id}: redirected to {urlparse(response.url).path}")
             return {}
@@ -479,7 +526,12 @@ def write_csv(rows):
         writer.writerows({**r, "raw": json.dumps(r["raw"], ensure_ascii=False)} for r in rows)
 
 
+DESCRIPTION_MAX = 12_000     # characters of each description in jobs.md (the rest is a link to the job)
+SUMMARY_MAX = 900_000        # GitHub caps a step's run summary at 1 MiB
+
+
 def markdown(meta, rows):
+    """The jobs table, then each description in a collapsible block (jobs.md and the run page's summary)."""
     cell = lambda v: str(v or "").replace("|", "\\|").replace("\n", " ")
     lines = [f"### {len(rows)} LinkedIn jobs: {meta['search']['search_term']!r} in {meta['search']['location']!r}",
              "", search_text(meta), ""]
@@ -498,6 +550,20 @@ def markdown(meta, rows):
         lines[-1] += f" Stopped at the scan limit ({SCAN_LIMIT}); loosen the filters or raise SCAN_LIMIT for more."
     if meta["error"]:
         lines += ["", f"**Error:** {cell(meta['error'])}"]
+    if rows:
+        lines += ["", "#### Descriptions", ""]
+        size = sum(map(len, lines))
+        for r in rows:
+            description = r["description"] or "_No description: the job page couldn't be read._"
+            if len(description) > DESCRIPTION_MAX:
+                description = description[:DESCRIPTION_MAX].rsplit("\n", 1)[0] + f"\n\n… [full description]({r['url']})"
+            block = [f"<details><summary><b>{html.escape(r['title'])}</b> · {html.escape(r['company'] or '')}</summary>",
+                     "", description, "", "</details>", ""]
+            if size + sum(map(len, block)) > SUMMARY_MAX:
+                lines.append(f"_{len(rows) - rows.index(r)} more descriptions are in jobs.json / report.html._")
+                break
+            lines += block
+            size += sum(map(len, block))
     return "\n".join(lines) + "\n"
 
 

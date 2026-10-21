@@ -49,7 +49,7 @@ Each run uploads an artifact **jobs-&lt;run number&gt;** (kept 30 days), downloa
 | `report.html` | Reading: open in a browser. One card per job, a search box, expandable descriptions, light / dark |
 | `jobs.json` | Scripts / n8n / Supabase: `{"meta": {search, filters, counts, error}, "jobs": [rows]}` |
 | `jobs.csv` | Excel / Sheets / `COPY`: the same rows (`raw` as a JSON string) |
-| `jobs.md` | Pasting into Slack / Notion / GitHub: a table of the jobs. Also shown on the run page |
+| `jobs.md` | The run page's summary (and Slack / Notion / GitHub): a table of the jobs, then each description in a collapsible block |
 
 ### Rows (`public.jobs`)
 
@@ -78,11 +78,18 @@ are left out of the rows, so an upsert keeps their values.
 Workflow inputs map to environment variables read by `scrape.py` (`SEARCH_TERM`, `LOCATION`, `HOURS_OLD`,
 `RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`). `SEARCH_NAME`, `DISTANCE` (miles,
 default 50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
-(empty results, 429s), add a repo secret `PROXIES` with comma-separated `user:pass@host:port` proxies.
+(empty results, 429s), add a repo secret `PROXIES` with comma-separated `user:pass@host:port` proxies. Requests
+LinkedIn rate-limits (429) or fails (5xx) are retried twice, after 5 and 15 seconds, before a page is given up on.
+
+No LinkedIn login is needed or supported: the scraper reads LinkedIn's public pages. Scraping while signed in breaks
+LinkedIn's User Agreement and gets accounts restricted.
 
 ## Locally
 
 ```
 pip install -r requirements.txt
+cp .env.example .env              # optional: settings for local runs (gitignored)
 SEARCH_TERM="data engineer" EXPERIENCE="entry level" python scrape.py     # writes out/, open out/report.html
 ```
+
+`scrape.py` reads `.env` on start; variables set in the environment (as above) win over it.
