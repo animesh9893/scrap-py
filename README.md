@@ -44,7 +44,7 @@ after the first run has created the tables) adds frontend / backend / full stack
 | `search_keywords` | |
 | --- | --- |
 | `keyword`, `kind` | what's searched: a title or a skill (`frontend developer`, `java`) |
-| `category` | the site's tab for the jobs it finds (`frontend`, `backend`, `fullstack`, `mobile`) |
+| `category` | the site's tab for the jobs it finds (`frontend`, `backend`, `fullstack`, `mobile`, `devops`, `data`, `ai`, `qa`, `security`) |
 | `excluded_location_ids` | `locations.id`s it's never searched in |
 | `excluded_sources` | platforms it's never searched on |
 | `exclude_title_words`, `experience`, `hours_old`, `max_results` | its own filters, instead of the form's defaults |
@@ -54,15 +54,17 @@ after the first run has created the tables) adds frontend / backend / full stack
 | --- | --- |
 | `name`, `country`, `aliases` | the place (`Bengaluru`, also `Bangalore`) |
 | `excluded_sources` | platforms that aren't searched here (say, Naukri doesn't cover it) |
-| `source_params` | each platform's own name for it: `{"linkedin": {"location": "Bengaluru, Karnataka, India"}}` |
+| `source_params` | each platform's own name for it: `{"linkedin": {"location": "Bengaluru, Karnataka, India"}}`; `term_suffix` is added to every keyword searched there (`{"linkedin": {"location": "United States", "term_suffix": "remote"}}` for "Remote - US") |
 | `interval_hours`, `priority`, `is_active` | as for keywords; a pair uses the smaller interval and the sum of priorities |
 
 `sources` lists the platforms (`linkedin`); `enabled = false` stops searching one. Each planned run takes every
 active keyword × active location × enabled platform, drops the excluded pairs, keeps the ones not tried for their
-interval, and runs the never-run ones first, then by priority, then the most overdue, until `MAX_TASKS` or
-`TIME_BUDGET_MINUTES` (8). A pair looks back to an hour before its last successful run (its first run: `hours_old`).
-With the seed lists that's 63 searches every 2 hours, more than 4 every 10 minutes can do, so each pair comes round
-about every 2½ hours; raise `MAX_TASKS`, lengthen intervals or deactivate rows to change that.
+interval, and runs the never-run ones first (by priority), then the most overdue weighted by priority (overdue ×
+200 / priority), until `MAX_TASKS` or `TIME_BUDGET_MINUTES` (8). A pair looks back to an hour before its last
+successful run (its first run: `hours_old`). The seed lists have 27 keywords × 22 locations, far more than 4 searches
+every 10 minutes (about 576 a day) can keep at their intervals, so every pair still comes round but less often than
+its interval says, the low-priority ones least; raise `MAX_TASKS`, lengthen intervals or deactivate rows to change
+that.
 
 Jobs already saved and seen in the last `KNOWN_DAYS` (7) are only marked as seen again: their job pages aren't
 read, which saves most of the requests on a 10-minute schedule. A single search reads every page, so its report
@@ -121,7 +123,11 @@ paging until it has `results` jobs that pass, or until it has looked at `SCAN_LI
 | `sort` | scraper | LinkedIn ignores sorting; `recent` puts the jobs kept newest first |
 
 **There is no remote filter.** LinkedIn ignores remote / hybrid / on-site for logged-out searches and doesn't show
-the workplace type on the job page. Put "remote" in the search term instead.
+the workplace type on the job page. Put "remote" in the search term instead (the "Remote - …" locations do that with
+`term_suffix`).
+
+**Tech jobs only.** Titles that name a non-tech job (sales, marketing, recruiting, HR, support, accounts, teaching,
+mechanical or civil engineering…; `NON_TECH` in search.py) are skipped whatever the search, as `non_tech`.
 
 Rejected jobs are logged with the reason. The counts per reason are in `jobs.json`, `jobs.md` and the report, which
 also say when a run stopped at `SCAN_LIMIT` before finding `results` jobs. A value that isn't valid (an unknown

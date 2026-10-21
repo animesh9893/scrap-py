@@ -72,3 +72,15 @@ def test_sweep_takes_every_pair_with_the_full_lookback():
     assert {p.search.name: p.search.hours_old for p in planned} == {
         "react in Pune": 24, "java in Pune": 48, "java in Noida": 48}
     assert due == 3
+
+
+def test_overdue_beats_priority_and_term_suffix():
+    keywords = [kw(1, "react", priority=50), kw(2, "java", priority=150)]
+    remote = loc(2, "Remote - US", source_params={"linkedin": {"location": "United States", "term_suffix": "remote"}})
+    tried = {("linkedin", 1, 1): NOW - timedelta(hours=3), ("linkedin", 2, 1): NOW - timedelta(hours=10),
+             ("linkedin", 1, 2): NOW - timedelta(hours=3), ("linkedin", 2, 2): NOW - timedelta(hours=3)}
+    planned, _ = build(keywords, [loc(1, "Pune"), remote], tried=tried, ok=tried)
+    # java in Pune: 5x overdue at priority 250 outweighs react's 1.5x at 150
+    assert names(planned)[:2] == ["java in Pune", "react in Pune"]
+    s = next(p.search for p in planned if p.search.name == "react in Remote - US")
+    assert (s.term, s.where, s.location) == ("react remote", "United States", "Remote - US")

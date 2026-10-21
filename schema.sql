@@ -122,6 +122,32 @@ CREATE OR REPLACE VIEW company_stats AS
     FROM companies c LEFT JOIN jobs j ON j.company_slug = c.slug
     GROUP BY c.slug;
 
+-- The company's logo on each job (LinkedIn's, from the job page), as a column for automations that read jobs.
+-- companies.logo_url holds the newest one per company. LinkedIn's image links expire after some weeks.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS company_logo TEXT GENERATED ALWAYS AS (raw->>'companyLogo') STORED;
+
+-- The site's job list (base.sql has the first version), plus the company logo and "places": the names of the
+-- locations (locations.name) whose searches found the job, for the site's location filter.
+CREATE OR REPLACE VIEW public_jobs AS
+    SELECT j.job_id AS id, j.title, j.company, j.location, j.category, j.workplace, j.url,
+           j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
+           j.first_seen_at AS "firstSeenAt", j.company_slug AS "companySlug",
+           COALESCE(c.is_premium, false) AS "companyPremium", j.role, j.level, j.tags,
+           COALESCE(c.logo_url, j.raw->>'companyLogo') AS "companyLogo",
+           ARRAY(SELECT DISTINCT l.name FROM job_search_hits h JOIN locations l ON l.id = h.location_id
+                 WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.name) AS places
+    FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
+    WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
+CREATE INDEX IF NOT EXISTS job_search_hits_job ON job_search_hits (source, job_id);
+
+-- The site's location filter: active locations, grouped by country, with how many listed jobs each has.
+CREATE OR REPLACE VIEW public_locations AS
+    SELECT l.name, l.country, l.priority,
+           (SELECT COUNT(DISTINCT (h.source, h.job_id))::int FROM job_search_hits h
+            JOIN jobs j ON j.source = h.source AND j.job_id = h.job_id
+            WHERE h.location_id = l.id AND j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days') AS jobs
+    FROM locations l WHERE l.is_active;
+
 -- Private, like the old tables: RLS with no policies, and the site's public key can't read them.
 ALTER TABLE sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE search_keywords ENABLE ROW LEVEL SECURITY;
@@ -131,5 +157,6 @@ DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         REVOKE ALL ON sources, search_keywords, locations, job_search_hits, company_stats FROM anon, authenticated;
         REVOKE EXECUTE ON FUNCTION upsert_jobs(JSONB), expire_jobs(INTEGER) FROM PUBLIC, anon, authenticated;
+        GRANT SELECT ON public_jobs, public_locations TO anon, authenticated;
     END IF;
 END $$;

@@ -115,6 +115,23 @@ def norm(text):
     return re.sub(r"[^a-z]", "", (text or "").lower())
 
 
+# Titles that aren't tech jobs, skipped whatever the search: a "data analyst" or "cloud" search also finds sales,
+# recruiting and support roles. Whole words, any case.
+NON_TECH = re.compile(r"\b(" + "|".join([
+    r"sales", r"marketing(?! cloud)", r"recruit(?:er|ers|ment|ing)", r"talent acquisition", r"human resources", r"hr",
+    r"business development", r"account (?:executive|manager)", r"accountant", r"accounts", r"finance manager",
+    r"customer (?:support|service|success|care)", r"tele ?(?:caller|sales)", r"call cent(?:er|re)", r"bpo",
+    r"content writer", r"copywriter", r"graphic designer", r"teacher", r"tutor", r"faculty", r"professor",
+    r"nurse", r"doctor", r"pharmacist", r"receptionist", r"(?:delivery|cab|truck|car) driver",
+    r"delivery (?:boy|executive|partner)", r"warehouse", r"store manager", r"field executive", r"insurance (?:agent|advisor)",
+    r"(?:mechanical|civil|chemical|electrical) engineer",
+]) + r")\b", re.I)
+
+
+def is_non_tech(title):
+    return bool(NON_TECH.search(title or ""))
+
+
 HOURS_PER = {"minute": 1 / 60, "hour": 1, "day": 24, "week": 24 * 7, "month": 24 * 30, "year": 24 * 365}
 
 
