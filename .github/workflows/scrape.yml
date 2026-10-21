@@ -13,7 +13,7 @@ on:
         default: 'Bengaluru'
       sites:
         description: 'Job boards, comma-separated (naukri, indeed, linkedin, glassdoor, google, zip_recruiter)'
-        default: 'naukri,indeed,linkedin,glassdoor'
+        default: 'naukri,indeed,linkedin'
       results:
         description: 'Results per site'
         default: '30'
@@ -32,7 +32,7 @@ on:
         type: boolean
         default: true
       fetch_desc:
-        description: 'Full job descriptions (one extra request per LinkedIn / Naukri / Glassdoor job; Indeed always has them)'
+        description: 'Full job descriptions (one extra request per LinkedIn / Naukri job; Indeed always has them)'
         type: boolean
         default: true
   push:

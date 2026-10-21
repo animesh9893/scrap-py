@@ -42,13 +42,13 @@ def env_bool(name, default):
 RUN_BOARDS   = env_bool("RUN_BOARDS", True)
 RUN_ATS      = env_bool("RUN_ATS", True)
 
-SITES        = env_list("SITES", ["naukri", "indeed", "linkedin", "glassdoor"])   # also: google, zip_recruiter
+SITES        = env_list("SITES", ["naukri", "indeed", "linkedin"])   # also: google, zip_recruiter (glassdoor 403s on GitHub runners without a proxy)
 SEARCH_TERM  = env("SEARCH_TERM", "software engineer")
 LOCATION     = env("LOCATION", "Bengaluru")
 COUNTRY      = env("COUNTRY", "India")          # for Indeed / Glassdoor
 RESULTS      = int(env("RESULTS", "30"))        # per site
 HOURS_OLD    = int(env("HOURS_OLD", "24"))
-FETCH_DESC   = env_bool("FETCH_DESC", True)     # full descriptions: one extra request per LinkedIn / Naukri / Glassdoor job
+FETCH_DESC   = env_bool("FETCH_DESC", True)     # full descriptions: one extra request per LinkedIn / Naukri job
 PROXIES      = env_list("PROXIES", None)        # e.g. user:pass@host:port,host2:port (a repo secret)
 
 # "ats:slug" or bare "slug" (auto-detect greenhouse -> lever -> ashby)
