@@ -28,7 +28,7 @@ Each run uploads an artifact **jobs-&lt;run number&gt;** (kept 30 days), downloa
 | --- | --- |
 | `boards_<stamp>.csv` / `.json` | Every column JobSpy returns (description, salary, company info, …) |
 | `ats_<stamp>.csv` / `.json` | Every ATS posting, with `description_html` and department |
-| `all_jobs_<stamp>.csv` / `.json` | Common columns (source, company, title, location, url, posted_at), de-duplicated by url |
+| `all_jobs_<stamp>.csv` / `.json` | Both combined with every column: source, company, title, location, url, posted_at, description first, then the rest (salary, job_level, company_industry, department, …). De-duplicated by url |
 | `summary.json` | Jobs per site / company, errors, and the settings used |
 
 The run page also shows a table of jobs per source.

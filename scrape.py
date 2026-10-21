@@ -4,7 +4,7 @@ Runs on GitHub Actions (.github/workflows/scrape.yml) and writes everything to O
 workflow uploads as the run's artifact:
   boards_<stamp>.csv / .json   every column JobSpy returns, one row per job board posting
   ats_<stamp>.csv / .json      every ATS posting, with description_html
-  all_jobs_<stamp>.csv / .json common columns of both, de-duplicated by url
+  all_jobs_<stamp>.csv / .json both combined with every column (descriptions included), de-duplicated by url
   summary.json                 counts per source and per site/company, plus any errors
 
 Every setting can be overridden with an environment variable of the same name (the workflow's inputs set them).
@@ -173,20 +173,22 @@ def main():
         ats_df = run_ats()
         if len(ats_df): save(ats_df, f"ats_{stamp}")
 
-    # Normalized combined view (common columns)
+    # Combined view: every column from both, the common ones first and under one name
+    common = ["source", "company", "title", "location", "url", "posted_at", "description"]
     parts = []
     if len(boards_df):
-        b = boards_df.rename(columns={"site": "source", "job_url": "url", "date_posted": "posted_at"})
-        parts.append(b.reindex(columns=["source", "company", "title", "location", "url", "posted_at"]))
+        parts.append(boards_df.rename(columns={"site": "source", "job_url": "url", "date_posted": "posted_at"}))
     if len(ats_df):
-        parts.append(ats_df.reindex(columns=["source", "company", "title", "location", "url", "posted_at"]))
+        parts.append(ats_df.rename(columns={"description_html": "description"}))
 
     all_df = pd.concat(parts, ignore_index=True).drop_duplicates(subset=["url"]) if parts else pd.DataFrame()
+    if len(all_df):
+        all_df = all_df.reindex(columns=common + [c for c in all_df.columns if c not in common])
     print(f"\n🎯 TOTAL: {len(all_df)} unique jobs")
     if len(all_df):
         print(all_df["source"].value_counts().to_string())
         save(all_df, f"all_jobs_{stamp}")
-        print(all_df.head(25).to_string(max_colwidth=50))
+        print(all_df[common[:-1]].head(25).to_string(max_colwidth=50))
 
     summary.update(stamp=stamp, total_unique=len(all_df),
                    by_source=all_df["source"].value_counts().to_dict() if len(all_df) else {},
