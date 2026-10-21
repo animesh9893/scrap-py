@@ -203,3 +203,7 @@ pytest tests
 
 A new platform (Naukri, …) is a new `sources/<name>.py` with `NAME`, `LABEL`, `problems(search)` and
 `run(search, known)` returning rows shaped like `public.jobs`, added to `sources.AVAILABLE` and the `sources` table.
+
+## Website
+
+`web/` is the jobs.krawlr.com site, moved here unchanged from the old job-scraper repo: plain HTML and JS, no build step. Every page reads the Supabase `public_*` views in the browser with the publishable key in `web/config.js`; that key can only read those views. `web/api/*.mjs` are Vercel functions for the Telegram bot and post status; they need `SUPABASE_URL` and a secret key in the host's environment variables. `vercel.json` serves `web/` as the site root.
