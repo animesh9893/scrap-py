@@ -1,8 +1,10 @@
-// Vercel serverless function (Vercel's root directory is web/, so it lives in web/api): Telegram sends every message to the bot here (the webhook set by
-// src/telegram-setup.js). Subscribers are stored in Supabase over its REST API with the secret key,
-// so this needs no npm packages. Vercel env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
+// Netlify function at /api/telegram: Telegram sends every message to the bot here (the webhook set by
+// job-scraper's src/telegram-setup.js). Subscribers are stored in Supabase over its REST API with the secret key,
+// so this needs no npm packages. Netlify env vars: TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET,
 // SUPABASE_URL, SUPABASE_SECRET_KEY (the service_role / secret key, never the public one).
-import { handleUpdate } from './_telegram-bot.mjs';
+import { handleUpdate } from '../lib/telegram-bot.mjs';
+
+export const config = { path: '/api/telegram' };
 
 const env = (name) => {
     const v = process.env[name];
@@ -41,16 +43,16 @@ async function tg(method, body) {
     return data;
 }
 
-export default async function handler(req, res) {
+export default async function handler(req) {
     // Only Telegram knows the secret (sent with setWebhook), so nobody else can post fake updates.
     if (req.method !== 'POST' || !process.env.TELEGRAM_WEBHOOK_SECRET
-        || req.headers['x-telegram-bot-api-secret-token'] !== process.env.TELEGRAM_WEBHOOK_SECRET) {
-        return res.status(401).json({ ok: false });
+        || req.headers.get('x-telegram-bot-api-secret-token') !== process.env.TELEGRAM_WEBHOOK_SECRET) {
+        return Response.json({ ok: false }, { status: 401 });
     }
     try {
-        await handleUpdate(req.body ?? {}, { store: supabaseStore(), tg });
+        await handleUpdate(await req.json().catch(() => ({})), { store: supabaseStore(), tg });
     } catch (err) {
         console.error(err);   // still 200, or Telegram keeps resending the same update
     }
-    return res.status(200).json({ ok: true });
+    return Response.json({ ok: true });
 }
