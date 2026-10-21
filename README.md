@@ -2,8 +2,8 @@
 
 Krawlr job scraper in Python, run on GitHub Actions:
 
-- **Job boards** via [JobSpy](https://github.com/speedyapply/JobSpy) (`python-jobspy`): Naukri, Indeed, LinkedIn
-  (also Glassdoor, Google, ZipRecruiter).
+- **Job boards** via [JobSpy](https://github.com/speedyapply/JobSpy) (`python-jobspy`): Naukri, Indeed, LinkedIn,
+  Glassdoor (also Google, ZipRecruiter), with full descriptions (input `fetch_desc`, on by default).
 - **ATS public APIs**: Greenhouse, Lever, Ashby (`ats:slug`, or a bare slug to auto-detect).
 
 ## Run it

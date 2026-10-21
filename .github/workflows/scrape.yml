@@ -13,7 +13,7 @@ on:
         default: 'Bengaluru'
       sites:
         description: 'Job boards, comma-separated (naukri, indeed, linkedin, glassdoor, google, zip_recruiter)'
-        default: 'naukri,indeed,linkedin'
+        default: 'naukri,indeed,linkedin,glassdoor'
       results:
         description: 'Results per site'
         default: '30'
@@ -32,9 +32,9 @@ on:
         type: boolean
         default: true
       fetch_desc:
-        description: 'Full job descriptions where a board supports it (many more requests)'
+        description: 'Full job descriptions (one extra request per LinkedIn / Naukri / Glassdoor job; Indeed always has them)'
         type: boolean
-        default: false
+        default: true
   push:
     branches: [main]
     paths: ['scrape.py', 'requirements.txt', '.github/workflows/scrape.yml']
