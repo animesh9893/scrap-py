@@ -6,7 +6,10 @@ you're not logged in. Every job comes with its full description.
 
 ## Run it
 
-**On a schedule:** GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) with the defaults, except that
+**Repos:** changes are pushed to `animesh9893/scrap-py`; `proj-berry/scrap-py` (a fork of it) is the main repo, where
+the schedule runs. After new commits land here, sync the fork (proj-berry/scrap-py → **Sync fork** → **Update branch**).
+
+**On a schedule:** in `proj-berry/scrap-py` only, GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) with the defaults, except that
 scheduled runs only look at jobs posted in the last hour (`hours_old: 1`), so each run overlaps the previous one
 without re-scraping the whole day. Their artifacts are kept 7 days. GitHub starts scheduled runs on a best-effort
 basis (often a few minutes late, occasionally skipped under load), only from `main`, and pauses them after 60 days

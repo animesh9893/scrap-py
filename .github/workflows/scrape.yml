@@ -1,8 +1,8 @@
 name: Scrape jobs
 
 # Runs scrape.py (LinkedIn) and uploads what it writes (jobs.json, jobs.csv, jobs.md, report.html) as the run's
-# artifact "jobs-<run number>". Runs every 10 minutes on GitHub's schedule (looking back 1 hour), and on demand
-# with the Run workflow button or the API.
+# artifact "jobs-<run number>". Runs every 10 minutes on GitHub's schedule (looking back 1 hour) in proj-berry/scrap-py,
+# and on demand with the Run workflow button or the API.
 on:
   workflow_dispatch:
     inputs:
@@ -56,6 +56,9 @@ permissions:
 
 jobs:
   scrape:
+    # The schedule scrapes only in proj-berry/scrap-py, the main repo. Changes are pushed to animesh9893/scrap-py
+    # (its upstream), where scheduled runs are skipped; manual and push runs work in both.
+    if: github.event_name != 'schedule' || github.repository == 'proj-berry/scrap-py'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
