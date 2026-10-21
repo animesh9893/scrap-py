@@ -4,6 +4,10 @@ name: Scrape jobs
 # (jobs.json, jobs.csv, jobs.md, report.html per search) as the run's artifact "jobs-<run number>". Every 10 minutes on
 # GitHub's schedule in proj-berry/scrap-py it runs the due searches from the keyword and location lists (MODE=plan);
 # on demand (the Run workflow button or the API) one search from the form, or the lists with mode: plan.
+# Back to back: a planned run in proj-berry that succeeds starts the next one straight away (mode: plan, chain: true),
+# so searches don't wait for the next 10-minute tick; the schedule restarts the chain after a failure. The repo
+# variable CHAIN=false turns that off. Repo variables MAX_TASKS and TIME_BUDGET_MINUTES set a planned run's size
+# (default 4 searches, 8 minutes).
 on:
   workflow_dispatch:
     inputs:
@@ -54,6 +58,10 @@ on:
         description: 'Save the jobs to Supabase (needs the DATABASE_URL secret)'
         type: boolean
         default: true
+      chain:
+        description: 'plan: start the next planned run when this one succeeds (proj-berry only)'
+        type: boolean
+        default: false
   schedule:
     - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
   push:
@@ -66,6 +74,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: write      # the next run in the chain (gh workflow run)
 
 jobs:
   scrape:
@@ -97,6 +106,8 @@ jobs:
           SORT: ${{ inputs.sort }}
           CATEGORY: ${{ inputs.category }}
           DRY_RUN: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.save) }}   # a push only tests
+          MAX_TASKS: ${{ vars.MAX_TASKS }}
+          TIME_BUDGET_MINUTES: ${{ vars.TIME_BUDGET_MINUTES }}
           PROXIES: ${{ secrets.PROXIES }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - uses: actions/upload-artifact@v4
@@ -105,4 +116,14 @@ jobs:
           name: jobs-${{ github.run_number }}
           path: out/
           if-no-files-found: warn
-          retention-days: ${{ github.event_name == 'schedule' && 7 || 30 }}   # 144 scheduled runs a day
+          retention-days: ${{ (github.event_name == 'schedule' || inputs.chain) && 7 || 30 }}   # 150+ planned runs a day
+      # Workflow runs started with the job's own token are allowed for workflow_dispatch. Only after a success, so a
+      # failing scrape (LinkedIn blocking, a bad secret) waits for the schedule instead of retrying in a loop. The
+      # concurrency group keeps it to one run at a time, with at most one waiting.
+      - name: Start the next run
+        if: >-
+          github.repository == 'proj-berry/scrap-py' && vars.CHAIN != 'false' &&
+          (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.mode == 'plan' && inputs.chain))
+        run: gh workflow run scrape.yml --repo "$GITHUB_REPOSITORY" --ref "$GITHUB_REF_NAME" -f mode=plan -f chain=true -f save=true
+        env:
+          GH_TOKEN: ${{ github.token }}

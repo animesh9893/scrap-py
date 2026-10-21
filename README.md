@@ -16,6 +16,13 @@ each looking back to just before its previous run. Their artifacts are kept 7 da
 basis (often a few minutes late, occasionally skipped under load), only from `main`, and pauses them after 60 days
 without repository activity. To pause it, disable the workflow under Actions → **Scrape jobs** → **⋯**.
 
+**Back to back:** a planned run there that succeeds starts the next one at once (`gh workflow run`, mode `plan`,
+`chain: true`), so the searches run one after another instead of waiting for the next 10-minute tick; the concurrency
+group keeps one running and at most one waiting (a newer waiting run replaces the older, which shows as cancelled).
+After a failure the chain stops until the schedule's next run. Repository variables (Settings → Secrets and variables
+→ Actions → Variables): `CHAIN=false` turns it off; `MAX_TASKS` and `TIME_BUDGET_MINUTES` size each planned run
+(default 4 searches, 8 minutes; keep the budget under the job's 60-minute timeout).
+
 **On demand:** Actions → **Scrape jobs** → **Run workflow**, fill in the form (every field has a default). Mode
 `single` runs the one search in the form; `plan` runs the due searches from the lists, like the schedule; `plan-only`
 only prints what `plan` would search. It also runs on a push to `main` that changes the scraper, with the defaults and
