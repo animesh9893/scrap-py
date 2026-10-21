@@ -7,7 +7,11 @@ exclusions, that is due, most overdue first, cut to the run's budget. MODE=sweep
                DEFAULT_INTERVAL_HOURS), with SLACK to spare so a scheduled run that starts early doesn't skip it
   looks back   since the pair's last successful run plus an hour of overlap, at most the keyword's hours_old (else
                HOURS_OLD); a pair never run looks back the full hours_old
-  order        never run first, then lower priority (keyword's + location's), then most overdue
+  order        never run first (lower priority first: keyword's + location's), then most overdue weighted by
+               priority (overdue × 200 / priority), so a pair with a high priority number still gets its turn when
+               there are more due pairs than a run takes, just less often
+  term         the keyword, plus the location's source_params.<source>.term_suffix if it has one ("remote" for a
+               "Remote - US" location searched as "United States")
 
 plan() reads the lists and the runs table; build() is the same without a database, for tests and `MODE=plan-only`.
 """
@@ -51,8 +55,9 @@ def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, d
                 hours_old = (min(full, math.ceil((now - ok).total_seconds() / 3600) + 1) if due_only and ok and full
                              else full)
                 params = (loc["source_params"] or {}).get(source) or {}
+                term = " ".join(filter(None, [kw["keyword"], params.get("term_suffix")]))
                 search = defaults.but(
-                    source=source, term=kw["keyword"], location=loc["name"], name=f"{kw['keyword']} in {loc['name']}",
+                    source=source, term=term, location=loc["name"], name=f"{kw['keyword']} in {loc['name']}",
                     hours_old=hours_old, results=kw["max_results"] or defaults.results,
                     scan_limit=max(defaults.scan_limit, (kw["max_results"] or 0) * 5),
                     exclude=tuple(kw["exclude_title_words"] or defaults.exclude),
@@ -61,7 +66,8 @@ def build(keywords, locations, sources, last_tried, last_ok, defaults, now, *, d
                     source_location=params.get("location"), company_ids=(), easy_apply=False)
                 due.append((kw["priority"] + loc["priority"],
                             Planned(search, ok, (now - tried) / interval if tried else math.inf)))
-    due.sort(key=lambda d: (d[1].overdue != math.inf, d[0], -d[1].overdue if d[1].overdue != math.inf else 0))
+    due.sort(key=lambda d: (d[1].overdue != math.inf,
+                            d[0] if d[1].overdue == math.inf else -d[1].overdue * 200 / max(d[0], 1)))
     return [p for _, p in due[:max_tasks]], len(due)
 
 

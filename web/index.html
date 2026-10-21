@@ -74,6 +74,21 @@
   .companies .tab { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; flex: none; }
   .companies .tab.quiet:not([aria-pressed="true"]) { color: var(--muted); }
   .logo { width: 16px; height: 16px; border-radius: 4px; flex: none; background: var(--chip); }
+  .places { position: relative; }
+  .places summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; max-width: 100%; }
+  .places summary::-webkit-details-marker { display: none; }
+  .places summary .sel { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .places[open] summary, .places.picked summary { border-color: var(--accent); }
+  .places .panel {
+    position: absolute; z-index: 5; top: calc(100% + 6px); left: 0; width: min(360px, calc(100vw - 32px));
+    max-height: 60vh; overflow-y: auto; padding: 8px 12px 12px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 8px 24px rgb(0 0 0 / .12);
+  }
+  .places .group { margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .places label { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14px; cursor: pointer; }
+  .places label .n { margin-left: auto; color: var(--muted); font-size: 12px; }
+  .places input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .places .clear { margin-top: 8px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 14px; cursor: pointer; padding: 0; }
   input[type="search"] {
     width: 100%; padding: 10px 14px; font: inherit; color: var(--text);
     background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -180,7 +195,7 @@
     <nav class="site-links" aria-label="Site policies"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="copyright.html">Copyright</a></nav>
     <header>
       <div class="brand"><img src="logo.svg" alt=""><h1 id="title">Tech Jobs</h1></div>
-      <p>Frontend, backend, full stack and mobile developer jobs from around the world.</p>
+      <p>Tech jobs only: frontend, backend, full stack, mobile, DevOps, data, AI, QA and security, in India, the US, Canada and remote.</p>
       <button class="refresh" id="refresh" type="button"><span class="icon" aria-hidden="true">↻</span> Refresh jobs</button>
     </header>
     <p class="fresh">🔔 New jobs are added every few hours. <button type="button" id="refresh2">Refresh</button> to see the latest.</p>
@@ -188,7 +203,13 @@
 
     <div class="controls">
       <div class="row" id="categories" role="group" aria-label="Category"></div>
-      <div class="row" id="workplaces" role="group" aria-label="Workplace"></div>
+      <div class="row">
+        <div class="row" id="workplaces" role="group" aria-label="Workplace"></div>
+        <details class="places" id="places" hidden>
+          <summary class="tab"><span aria-hidden="true">📍</span><span class="sel" id="places-label">Any location</span> ▾</summary>
+          <div class="panel" id="places-panel" role="group" aria-label="Locations"></div>
+        </details>
+      </div>
       <div class="row companies" id="companies" role="group" aria-label="Companies" hidden></div>
       <input type="search" id="q" list="company-names" placeholder="Search title, company or location…" aria-label="Search jobs">
       <datalist id="company-names"></datalist>
@@ -218,11 +239,13 @@
 const PAGE_SIZE = 25;
 const WORKPLACES = [['all', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site / not stated']];
 let CATEGORIES = [['all', 'All']];   // filled from the categories table
-const FALLBACK_CATEGORIES = [['frontend', 'Frontend'], ['backend', 'Backend'], ['fullstack', 'Full stack'], ['mobile', 'Mobile']]
+const FALLBACK_CATEGORIES = [['frontend', 'Frontend'], ['backend', 'Backend'], ['fullstack', 'Full stack'], ['mobile', 'Mobile'],
+  ['devops', 'DevOps & Cloud'], ['data', 'Data'], ['ai', 'AI / ML'], ['qa', 'QA & Testing'], ['security', 'Security']]
   .map(([slug, label]) => ({ slug, label }));
 let LABEL = {};
 
-const state = { category: 'all', workplace: 'all', company: '', premium: false, q: '' };
+const state = { category: 'all', workplace: 'all', places: [], company: '', premium: false, q: '' };
+let LOCATIONS = [];  // [{ name, country, jobs }] from public_locations, for the location picker
 let COMPANIES = new Map();   // slug → { slug, name, domain, isPremium, jobs, jobsWeek, salaryMin, … }, from public_companies
 const SALARIES = new Map();  // slug → promise of its per-role salaries, highest median first
 let source;        // where jobs come from: Supabase or jobs.json, same interface
@@ -243,10 +266,34 @@ const logo = (c) => (c?.logoUrl || c?.domain) && el('img', {
   onerror() { this.remove(); },
 });
 // The category and workplace counts are for all jobs, so they're hidden while other filters narrow the list.
-const countsShown = () => !state.q.trim() && !state.company && !state.premium;
+const countsShown = () => !state.q.trim() && !state.company && !state.premium && !state.places.length;
 
 // Only link out to http(s) URLs.
 const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : null; } catch { return null; } };
+
+// "Posted 5h ago" from LinkedIn's posting time: to the minute or hour for jobs under a day old, else only the
+// date ("2026-10-20"), counted in calendar days. Jobs without one say when the scraper found them.
+function postedAgo(j) {
+  const p = j.postedAt;
+  if (!p) return fetchedAgo(j.firstSeenAt);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+    const [y, m, d] = p.split('-').map(Number);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((today - new Date(y, m - 1, d)) / 86400000);
+    if (Number.isNaN(days)) return fetchedAgo(j.firstSeenAt);
+    if (days <= 0) return 'Posted today';
+    if (days === 1) return 'Posted yesterday';
+    return days < 30 ? `Posted ${days}d ago` : `Posted ${new Date(y, m - 1, d).toLocaleDateString()}`;
+  }
+  const mins = Math.floor((Date.now() - new Date(p)) / 60000);
+  if (Number.isNaN(mins)) return fetchedAgo(j.firstSeenAt);
+  if (mins < 1) return 'Posted just now';
+  if (mins < 60) return `Posted ${mins}m ago`;
+  if (mins < 24 * 60) return `Posted ${Math.floor(mins / 60)}h ago`;
+  return `Posted ${Math.floor(mins / 1440)}d ago`;
+}
+const whenTitle = (j) => [j.postedAt && `Posted on LinkedIn: ${new Date(j.postedAt).toLocaleString()}`,
+  j.firstSeenAt && `Found: ${new Date(j.firstSeenAt).toLocaleString()}`].filter(Boolean).join('\n');
 
 // "Fetched 5m ago" / "2h ago" / "3d ago": when the scraper first found the job.
 function fetchedAgo(dateStr) {
@@ -273,6 +320,8 @@ async function supabaseSource() {
     footer: 'Live listings, updated after every scrape. Open a job for its details and the link to apply on LinkedIn.',
     categories: async () => (await run(db.from('public_categories').select('slug, label').order('sort_order').order('slug'))).data,
     counts: async () => (await run(db.from('public_job_counts').select('*'))).data,
+    locations: async () => (await run(db.from('public_locations').select('name, country, jobs')
+      .order('priority').order('name'))).data,
     // Premium companies plus the ones with the most listed jobs, for the chips and the search suggestions.
     companies: async () => (await run(db.from('public_companies').select('*')
       .or('isPremium.eq.true,jobs.gt.0').order('jobs', { ascending: false }).limit(500))).data,
@@ -280,11 +329,13 @@ async function supabaseSource() {
       .eq('companySlug', slug).order('median', { ascending: false, nullsFirst: false }).order('title'))).data,
     async page(f, offset) {
       let query = db.from('public_jobs').select('*', offset === 0 ? { count: 'exact' } : {})
-        .order('firstSeenAt', { ascending: false }).order('id')   // id breaks ties, so pages never overlap
+        .order('postedAt', { ascending: false, nullsFirst: false }).order('firstSeenAt', { ascending: false })
+        .order('id')   // id breaks ties, so pages never overlap
         .range(offset, offset + PAGE_SIZE - 1);
       if (f.category !== 'all') query = query.eq('category', f.category);
       if (f.workplace === 'onsite') query = query.is('workplace', null);
       else if (f.workplace !== 'all') query = query.eq('workplace', f.workplace);
+      if (f.places.length) query = query.overlaps('places', f.places);
       if (f.company) query = query.eq('companySlug', f.company);
       if (f.premium) query = query.eq('companyPremium', true);
       const q = cleanQuery(f.q);
@@ -310,11 +361,14 @@ async function jsonSource() {
     footer: `Updated ${new Date(data.generatedAt).toLocaleString()}. Open a job for its details and the link to apply on LinkedIn.`,
     categories: async () => data.categories ?? [...new Set(data.jobs.map((j) => j.category).filter(Boolean))].map((slug) => ({ slug, label: slug })),
     counts: async () => [...tally.values()],
+    locations: async () => [...new Set(data.jobs.flatMap((j) => j.places ?? []))].map((name) => ({ name, country: null,
+      jobs: data.jobs.filter((j) => j.places?.includes(name)).length })),
     companies: async () => data.companies ?? [],
     salaries: async (slug) => (data.salaries ?? []).filter((s) => s.companySlug === slug),
     async page(f, offset) {
       const q = cleanQuery(f.q).toLowerCase();
       const all = data.jobs.filter((j) => matchesCategory(j.category, f.category) && matchesWorkplace(j.workplace, f.workplace) &&
+        (!f.places.length || f.places.some((p) => j.places?.includes(p))) &&
         (!f.company || j.companySlug === f.company) && (!f.premium || j.companyPremium) &&
         (!q || [j.title, j.company, j.location].some((v) => v && v.toLowerCase().includes(q))));
       return { jobs: all.slice(offset, offset + PAGE_SIZE), total: all.length };
@@ -340,6 +394,38 @@ function renderTabs() {
   renderButtons($('workplaces'), WORKPLACES, 'workplace',
     (w) => sum((r) => matchesCategory(r.category, state.category) && matchesWorkplace(r.workplace, w)));
 }
+
+// The location picker: a dropdown of checkboxes grouped by country (remote ones last); any picked location matches.
+const COUNTRY = { IN: 'India', US: 'United States', CA: 'Canada' };
+const placeGroup = (l) => (l.name.startsWith('Remote') ? 'Remote' : COUNTRY[l.country] ?? l.country ?? 'Other');
+function renderPlaces() {
+  const box = $('places');
+  box.hidden = !LOCATIONS.length;
+  const picked = state.places;
+  box.classList.toggle('picked', picked.length > 0);
+  $('places-label').textContent = !picked.length ? 'Any location'
+    : picked.length <= 2 ? picked.join(', ') : `${picked.slice(0, 2).join(', ')} +${picked.length - 2}`;
+  const groups = new Map();
+  for (const l of LOCATIONS) {
+    const g = placeGroup(l);
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(l);
+  }
+  const order = [...groups.keys()].sort((a, b) => (a === 'Remote') - (b === 'Remote'));
+  $('places-panel').replaceChildren(...order.flatMap((g) => [
+    el('div', { className: 'group', textContent: g }),
+    ...groups.get(g).map((l) => el('label', {},
+      el('input', { type: 'checkbox', checked: picked.includes(l.name), onchange(e) {
+        state.places = e.target.checked ? [...picked, l.name] : picked.filter((p) => p !== l.name);
+        sync();
+      } }),
+      l.name, el('span', { className: 'n', textContent: l.jobs ?? '' }))),
+  ]), ...(picked.length ? [el('button', { className: 'clear', type: 'button', textContent: 'Clear locations',
+    onclick() { state.places = []; sync(); } })] : []));
+}
+// Closes the picker on a click outside it or Escape.
+document.addEventListener('click', (e) => { if (!$('places').contains(e.target)) $('places').open = false; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('places').open = false; });
 
 // Premium companies first, the ones with the most new jobs this week leading; a company picked from search
 // that isn't premium is shown in front so it can be cleared.
@@ -465,7 +551,7 @@ function jobCard(j) {
         !state.company && salaryRange(COMPANIES.get(j.companySlug)) && ' · '),
       el('div', { className: 'badges' }, ...badges),
     ),
-    el('span', { className: 'when', textContent: fetchedAgo(j.firstSeenAt), title: new Date(j.firstSeenAt).toLocaleString() }),
+    el('span', { className: 'when', textContent: postedAgo(j), title: whenTitle(j) }),
     url && el('span', { className: 'apply', ariaHidden: 'true', textContent: 'View job →' }),
   );
 }
@@ -508,12 +594,15 @@ async function loadMore() {
   if (more && $('more').getBoundingClientRect().top < innerHeight + 600) loadMore();
 }
 
-// Filters live in the URL (?category=backend&workplace=remote&company=google&q=react) so filtered views can be shared.
+// Filters live in the URL (?category=backend&workplace=remote&places=Pune,Remote%20-%20US&company=google&q=react) so filtered views can be shared.
 function sync() {
   const params = new URLSearchParams();
-  for (const [k, v] of Object.entries(state)) if (v && v !== 'all') params.set(k, v);
+  for (const [k, v] of Object.entries(state)) {
+    if (Array.isArray(v)) { if (v.length) params.set(k, v.join(',')); } else if (v && v !== 'all') params.set(k, v);
+  }
   history.replaceState(null, '', params.size ? `?${params}` : location.pathname);
   renderTabs();
+  renderPlaces();
   renderCompanies();
   renderCompanyInfo();
   resetList();
@@ -523,6 +612,8 @@ function readUrl() {
   const p = new URLSearchParams(location.search);
   if (CATEGORIES.some(([v]) => v === p.get('category'))) state.category = p.get('category');
   if (WORKPLACES.some(([v]) => v === p.get('workplace'))) state.workplace = p.get('workplace');
+  const names = new Set(LOCATIONS.map((l) => l.name));
+  state.places = (p.get('places') ?? '').split(',').filter((n) => names.has(n));
   state.company = p.get('company') ?? '';
   state.premium = p.get('premium') === 'true';
   state.q = p.get('q') ?? '';
@@ -558,9 +649,11 @@ new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMore(
   try {
     source = await (window.SUPABASE_URL && window.SUPABASE_ANON_KEY ? supabaseSource() : jsonSource());
     // Before the first scrape after an upgrade these views may not exist yet: the list still works.
-    const [categories, rows, companies] = await Promise.all([
+    const [categories, rows, companies, locations] = await Promise.all([
       source.categories().catch(() => FALLBACK_CATEGORIES), source.counts().catch(() => []), source.companies().catch(() => []),
+      source.locations().catch(() => []),
     ]);
+    LOCATIONS = locations;
     COMPANIES = new Map(companies.map((c) => [c.slug, c]));
     CATEGORIES = [['all', 'All'], ...categories.map((c) => [c.slug, c.label])];
     LABEL = Object.fromEntries(CATEGORIES);

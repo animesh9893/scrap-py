@@ -78,3 +78,10 @@ def test_source_location_is_what_linkedin_is_asked(monkeypatch):
 def test_problems():
     assert linkedin.problems(SEARCH) == []
     assert len(linkedin.problems(SEARCH.but(sort="newest", job_type=("weekly",), company_ids=("google",)))) == 3
+
+
+def test_non_tech_titles():
+    from search import is_non_tech
+    assert all(map(is_non_tech, ["Sales Executive", "Technical Recruiter", "HR Generalist", "Mechanical Engineer"]))
+    assert not any(map(is_non_tech, ["Salesforce Developer", "Device Driver Engineer", "Data Analyst",
+                                     "Marketing Cloud Developer", "Senior DevOps Engineer"]))

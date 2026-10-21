@@ -30,7 +30,8 @@ log = logging.getLogger(__name__)
 
 
 def detect_category(title):
-    """A category from the title when the search has none: the old project's detectCategory (src/scrape.js)."""
+    """A category from the title when the search has none: the old project's detectCategory (src/scrape.js), plus
+    the categories added since (ai, data, devops, security, qa)."""
     t = (title or "").lower()
     if re.search(r"\b(android|ios|mobile|flutter|react native|swift|kotlin)\b", t):
         return "mobile"
@@ -38,6 +39,18 @@ def detect_category(title):
         return "fullstack"
     if re.search(r"\b(front[\s-]?end|ui engineer|ui developer|react|angular|vue)\b", t):
         return "frontend"
+    if re.search(r"\b(machine learning|ml|ai|deep learning|llm|nlp|computer vision|gen ?ai|mlops)\b", t):
+        return "ai"
+    if re.search(r"\b(data (engineer|scientist|science|analyst|analytics)|analytics engineer|big data|etl|bi developer|"
+                 r"power bi|databricks)\b", t):
+        return "data"
+    if re.search(r"\b(devops|sre|site reliability|platform engineer|cloud (engineer|architect)|kubernetes|"
+                 r"infrastructure engineer|devsecops)\b", t):
+        return "devops"
+    if re.search(r"\b(security|cyber ?security|appsec|penetration|soc analyst)\b", t):
+        return "security"
+    if re.search(r"\b(qa|quality assurance|test(ing)? engineer|sdet|automation test(er|ing)?|tester)\b", t):
+        return "qa"
     if re.search(r"\b(back[\s-]?end|java|golang|node(\.?js)?|python|django|spring)\b|\.net\b|c#", t):
         return "backend"
     return None

@@ -2,8 +2,9 @@
 
 LinkedIn's logged-out search only applies some filters, so the rest are checked on each job's own page:
   by LinkedIn   term, location, distance, hours_old, company_ids, easy_apply
-  by us         job_type, experience (from the job page), exclude (words in the title), hours_old (re-checked to the
-                hour from "5 hours ago"), sort (LinkedIn ignores sortBy; "recent" sorts the jobs kept, newest first)
+  by us         job_type, experience (from the job page), exclude (words in the title), non-tech titles
+                (search.NON_TECH), hours_old (re-checked to the hour from "5 hours ago"), sort (LinkedIn ignores
+                sortBy; "recent" sorts the jobs kept, newest first)
 LinkedIn ignores its remote / hybrid / on-site filter for logged-out searches and doesn't show the workplace type
 on the job page, so there is no remote filter; put "remote" in the search term instead.
 
@@ -26,7 +27,7 @@ from jobspy.linkedin.util import criteria
 from jobspy.model import DescriptionFormat, ScraperInput
 from jobspy.util import check_status, description_fields, get_enum_from_job_type
 
-from search import age_hours, norm
+from search import age_hours, is_non_tech, norm
 
 NAME = "linkedin"
 LABEL = "LinkedIn"
@@ -189,6 +190,8 @@ class FilteredLinkedIn(LinkedIn):
         posted_ago = time_tag.get_text(strip=True) if time_tag else None
         if any(word.lower() in title.lower() for word in s.exclude):
             self._skip("excluded_title", f"{title!r}: excluded word in the title")
+        if is_non_tech(title):
+            self._skip("non_tech", f"{title!r}: not a tech job")
         if s.hours_old and (age_hours(posted_ago) or 0) > s.hours_old:
             self._skip("too_old", f"{title!r}: posted {posted_ago}")
         if job_id in self.known:                          # in the database already: no need to read its page again

@@ -199,13 +199,19 @@ END $$;
 -- and no policies, so that key can't read raw data, job-poster details or runs (descriptions only through
 -- public_job, for the job pages). The views run as their owner, which is why they can still read jobs.
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
-CREATE OR REPLACE VIEW public_jobs AS
-    SELECT j.job_id AS id, j.title, j.company, j.location, j.category, j.workplace, j.url,
-           j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
-           j.first_seen_at AS "firstSeenAt", j.company_slug AS "companySlug",
-           COALESCE(c.is_premium, false) AS "companyPremium", j.role, j.level, j.tags
-    FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
-    WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
+-- Only when it doesn't exist yet: schema.sql redefines it with more columns ("companyLogo", "places"), which a
+-- CREATE OR REPLACE with these columns would try to drop.
+DO $$ BEGIN
+    IF to_regclass('public.public_jobs') IS NULL THEN
+        CREATE VIEW public_jobs AS
+            SELECT j.job_id AS id, j.title, j.company, j.location, j.category, j.workplace, j.url,
+                   j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
+                   j.first_seen_at AS "firstSeenAt", j.company_slug AS "companySlug",
+                   COALESCE(c.is_premium, false) AS "companyPremium", j.role, j.level, j.tags
+            FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
+            WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
+    END IF;
+END $$;
 -- One job for its page on the site (web/job.html, linked from the board and LinkedIn posts): the listing with its
 -- description, pay and company logo. No 30-day cut-off, so links in older posts keep working.
 CREATE OR REPLACE VIEW public_job AS
