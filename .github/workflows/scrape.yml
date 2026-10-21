@@ -1,40 +1,45 @@
 name: Scrape jobs
 
-# Runs scrape.py and uploads everything it writes (CSV + JSON per source, combined file, summary) as the
-# run's artifact "jobs-<run number>". No schedule: start it with the Run workflow button or the API.
+# Runs scrape.py (LinkedIn) and uploads what it writes (jobs.json, jobs.csv, jobs.md, report.html) as the run's
+# artifact "jobs-<run number>". No schedule: start it with the Run workflow button or the API.
 on:
   workflow_dispatch:
     inputs:
       search_term:
-        description: 'Search term'
+        description: 'Search term (LinkedIn keywords; add "remote" for remote jobs)'
         default: 'software engineer'
       location:
         description: 'Location'
         default: 'Bengaluru'
-      sites:
-        description: 'Job boards, comma-separated (naukri, indeed, linkedin, glassdoor, google, zip_recruiter)'
-        default: 'naukri,indeed,linkedin'
-      results:
-        description: 'Results per site'
-        default: '30'
       hours_old:
-        description: 'Only jobs posted in the last N hours'
+        description: 'Only jobs posted in the last N hours (0 = any time)'
         default: '24'
-      companies:
-        description: 'ATS companies, comma-separated: ats:slug or bare slug (auto-detect)'
-        default: 'greenhouse:gitlab,lever:spotify,ashby:linear,stripe'
-      run_boards:
-        description: 'Scrape job boards'
+      results:
+        description: 'Jobs to keep, after filtering'
+        default: '30'
+      job_type:
+        description: 'Employment type'
+        type: choice
+        options: [any, full-time, part-time, contract, temporary, internship, volunteer]
+        default: any
+      experience:
+        description: 'Seniority, comma-separated: internship, entry level, associate, mid-senior level, director, executive'
+        default: ''
+      exclude:
+        description: 'Skip jobs with any of these words in the title, comma-separated (e.g. senior, lead)'
+        default: ''
+      company_ids:
+        description: 'Only these LinkedIn company ids, comma-separated (the number in the company search URL)'
+        default: ''
+      easy_apply:
+        description: 'Easy Apply jobs only'
         type: boolean
-        default: true
-      run_ats:
-        description: 'Fetch ATS companies'
-        type: boolean
-        default: true
-      fetch_desc:
-        description: 'Full job descriptions (one extra request per LinkedIn / Naukri job; Indeed always has them)'
-        type: boolean
-        default: true
+        default: false
+      sort:
+        description: 'Order'
+        type: choice
+        options: [recent, relevant]
+        default: recent
   push:
     branches: [main]
     paths: ['scrape.py', 'requirements.txt', '.github/workflows/scrape.yml']
@@ -56,19 +61,20 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
-      - run: pip install -q -U -r requirements.txt
+      - run: pip install -q -r requirements.txt
       - name: Scrape
         run: python scrape.py
         env:
           SEARCH_TERM: ${{ inputs.search_term }}
           LOCATION: ${{ inputs.location }}
-          SITES: ${{ inputs.sites }}
-          RESULTS: ${{ inputs.results }}
           HOURS_OLD: ${{ inputs.hours_old }}
-          COMPANIES: ${{ inputs.companies }}
-          RUN_BOARDS: ${{ inputs.run_boards }}
-          RUN_ATS: ${{ inputs.run_ats }}
-          FETCH_DESC: ${{ inputs.fetch_desc }}
+          RESULTS: ${{ inputs.results }}
+          JOB_TYPE: ${{ inputs.job_type }}
+          EXPERIENCE: ${{ inputs.experience }}
+          EXCLUDE: ${{ inputs.exclude }}
+          COMPANY_IDS: ${{ inputs.company_ids }}
+          EASY_APPLY: ${{ inputs.easy_apply }}
+          SORT: ${{ inputs.sort }}
           PROXIES: ${{ secrets.PROXIES }}
       - uses: actions/upload-artifact@v4
         if: always()
