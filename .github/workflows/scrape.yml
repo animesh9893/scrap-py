@@ -1,11 +1,17 @@
 name: Scrape jobs
 
-# Runs scrape.py (LinkedIn) and uploads what it writes (jobs.json, jobs.csv, jobs.md, report.html) as the run's
-# artifact "jobs-<run number>". Runs every 10 minutes on GitHub's schedule (looking back 1 hour) in proj-berry/scrap-py,
-# and on demand with the Run workflow button or the API.
+# Runs scrape.py, saves the jobs to Supabase when the repo has a DATABASE_URL secret, and uploads what it writes
+# (jobs.json, jobs.csv, jobs.md, report.html per search) as the run's artifact "jobs-<run number>". Every 10 minutes on
+# GitHub's schedule in proj-berry/scrap-py it runs the due searches from the keyword and location lists (MODE=plan);
+# on demand (the Run workflow button or the API) one search from the form, or the lists with mode: plan.
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'single: the search below. plan: the due searches from the keyword and location lists in Supabase'
+        type: choice
+        options: [single, plan, plan-only]
+        default: single
       search_term:
         description: 'Search term (LinkedIn keywords; add "remote" for remote jobs)'
         default: 'software engineer'
@@ -52,7 +58,7 @@ on:
     - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
   push:
     branches: [main]
-    paths: ['scrape.py', 'db.py', 'schema.sql', 'requirements.txt', '.github/workflows/scrape.yml']
+    paths: ['*.py', 'sources/**', 'schema.sql', 'requirements.txt', '.github/workflows/scrape.yml']
 
 concurrency:
   group: scrape
@@ -80,7 +86,8 @@ jobs:
         env:
           SEARCH_TERM: ${{ inputs.search_term }}
           LOCATION: ${{ inputs.location }}
-          HOURS_OLD: ${{ github.event_name == 'schedule' && '1' || inputs.hours_old }}   # scheduled: the last hour
+          MODE: ${{ github.event_name == 'schedule' && 'plan' || inputs.mode || 'single' }}   # scheduled: the lists
+          HOURS_OLD: ${{ inputs.hours_old }}     # plan: how far a pair's first run looks back; later ones, since the last
           RESULTS: ${{ inputs.results }}
           JOB_TYPE: ${{ inputs.job_type }}
           EXPERIENCE: ${{ inputs.experience }}
@@ -89,7 +96,7 @@ jobs:
           EASY_APPLY: ${{ inputs.easy_apply }}
           SORT: ${{ inputs.sort }}
           CATEGORY: ${{ inputs.category }}
-          DRY_RUN: ${{ github.event_name == 'push' || inputs.save == false }}   # a push only tests the scraper
+          DRY_RUN: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.save) }}   # a push only tests
           PROXIES: ${{ secrets.PROXIES }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
       - uses: actions/upload-artifact@v4

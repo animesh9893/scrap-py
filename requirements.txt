@@ -1,3 +1,4 @@
-python-jobspy==1.4.0   # scrape.py subclasses its LinkedIn scraper; check it still works before upgrading
+python-jobspy==1.4.0   # sources/linkedin.py subclasses its LinkedIn scraper; check it still works before upgrading
 beautifulsoup4
 psycopg[binary]>=3.2,<4   # db.py: saving to Supabase
+pytest   # tests/ only

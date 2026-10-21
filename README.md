@@ -1,22 +1,25 @@
 # scrap-py
 
-Krawlr LinkedIn job scraper in Python, run on GitHub Actions. It uses the LinkedIn scraper from
-[JobSpy](https://github.com/speedyapply/JobSpy) (`python-jobspy`, pinned) and adds the filters LinkedIn ignores when
-you're not logged in. Every job comes with its full description.
+Krawlr job scraper in Python, run on GitHub Actions. It searches job platforms for every keyword × location in two
+lists in Supabase, and saves the jobs to the `public.jobs` table the site reads. LinkedIn is the only platform so far:
+it uses the LinkedIn scraper from [JobSpy](https://github.com/speedyapply/JobSpy) (`python-jobspy`, pinned) and adds
+the filters LinkedIn ignores when you're not logged in. Every job comes with its full description.
 
 ## Run it
 
 **Repos:** changes are pushed to `animesh9893/scrap-py`; `proj-berry/scrap-py` (a fork of it) is the main repo, where
 the schedule runs. After new commits land here, sync the fork (proj-berry/scrap-py → **Sync fork** → **Update branch**).
 
-**On a schedule:** in `proj-berry/scrap-py` only, GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) with the defaults, except that
-scheduled runs only look at jobs posted in the last hour (`hours_old: 1`), so each run overlaps the previous one
-without re-scraping the whole day. Their artifacts are kept 7 days. GitHub starts scheduled runs on a best-effort
+**On a schedule:** in `proj-berry/scrap-py` only, GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) in
+plan mode: it runs the searches that are due from the [search lists](#search-lists), at most `MAX_TASKS` (4) per run,
+each looking back to just before its previous run. Their artifacts are kept 7 days. GitHub starts scheduled runs on a best-effort
 basis (often a few minutes late, occasionally skipped under load), only from `main`, and pauses them after 60 days
 without repository activity. To pause it, disable the workflow under Actions → **Scrape jobs** → **⋯**.
 
-**On demand:** Actions → **Scrape jobs** → **Run workflow**, fill in the form (every field has a default). It also
-runs on a push to `main` that changes the scraper, with the defaults. To start it from n8n or a script:
+**On demand:** Actions → **Scrape jobs** → **Run workflow**, fill in the form (every field has a default). Mode
+`single` runs the one search in the form; `plan` runs the due searches from the lists, like the schedule; `plan-only`
+only prints what `plan` would search. It also runs on a push to `main` that changes the scraper, with the defaults and
+without saving. To start it from n8n or a script:
 
 ```
 POST https://api.github.com/repos/<owner>/scrap-py/actions/workflows/scrape.yml/dispatches
@@ -26,20 +29,55 @@ Accept: application/vnd.github+json
 {"ref": "main", "inputs": {"search_term": "data engineer", "location": "Pune", "experience": "entry level, associate"}}
 ```
 
+## Search lists
+
+Two tables in Supabase say what to search; edit them in the table editor. `seed.sql` (run it once in the SQL editor,
+after the first run has created the tables) adds frontend / backend / full stack / mobile keywords and seven cities.
+
+| `search_keywords` | |
+| --- | --- |
+| `keyword`, `kind` | what's searched: a title or a skill (`frontend developer`, `java`) |
+| `category` | the site's tab for the jobs it finds (`frontend`, `backend`, `fullstack`, `mobile`) |
+| `excluded_location_ids` | `locations.id`s it's never searched in |
+| `excluded_sources` | platforms it's never searched on |
+| `exclude_title_words`, `experience`, `hours_old`, `max_results` | its own filters, instead of the form's defaults |
+| `interval_hours`, `priority`, `is_active` | how often it's due (default 2h), lower runs first, on / off |
+
+| `locations` | |
+| --- | --- |
+| `name`, `country`, `aliases` | the place (`Bengaluru`, also `Bangalore`) |
+| `excluded_sources` | platforms that aren't searched here (say, Naukri doesn't cover it) |
+| `source_params` | each platform's own name for it: `{"linkedin": {"location": "Bengaluru, Karnataka, India"}}` |
+| `interval_hours`, `priority`, `is_active` | as for keywords; a pair uses the smaller interval and the sum of priorities |
+
+`sources` lists the platforms (`linkedin`); `enabled = false` stops searching one. Each planned run takes every
+active keyword × active location × enabled platform, drops the excluded pairs, keeps the ones not tried for their
+interval, and runs the never-run ones first, then by priority, then the most overdue, until `MAX_TASKS` or
+`TIME_BUDGET_MINUTES` (8). A pair looks back to an hour before its last successful run (its first run: `hours_old`).
+With the seed lists that's 63 searches every 2 hours, more than 4 every 10 minutes can do, so each pair comes round
+about every 2½ hours; raise `MAX_TASKS`, lengthen intervals or deactivate rows to change that.
+
+Jobs already saved and seen in the last `KNOWN_DAYS` (7) are only marked as seen again: their job pages aren't
+read, which saves most of the requests on a 10-minute schedule. A single search reads every page, so its report
+shows every job (`SKIP_KNOWN` sets it either way).
+
 ## Saving to Supabase
 
 With a `DATABASE_URL` repo secret (the Supabase Postgres connection string: Project settings → Database → Connection
 string → URI, session pooler), every run saves its jobs to the database the old job-scraper built, so the site,
-Telegram alerts and LinkedIn posts pick them up like any other job. `db.py` does it in one transaction:
+Telegram alerts and LinkedIn posts pick them up like any other job. `db.py` does it, each search in its own
+transaction:
 
 1. Applies `schema.sql`: only additions (new tables, columns and functions, below), safe to run every time.
-2. Records the search: the search term in `search_keywords`, the location in `locations` (added the first time).
+2. For a single search, records it in the lists: the search term in `search_keywords`, the location in `locations`
+   (added inactive the first time, so a one-off search doesn't join the schedule).
 3. Upserts the jobs with `upsert_jobs()` on `(source, job_id)`. New jobs get the table defaults (`status` new,
    `first_seen_at`); a job seen before gets its scraped fields refreshed (kept when this scrape didn't get them) and
    `last_seen_at` bumped, keeps its `status`, tags, first category and `search_name`, and becomes `remote` if any
    search finds it remote. `workplace` is stored as the old pipeline did: `remote`, `hybrid` or null.
-4. Records which search found each job in `job_search_hits`, and the run in `runs` (actor `scrap-py`).
-5. Links jobs to companies with the old `link_companies()` (adds companies seen for the first time).
+4. Records which search found each job in `job_search_hits` (also the known jobs it found again), and the run in
+   `runs` (actor `scrap-py`, with the keyword, location and the run's meta).
+5. After all the searches, links jobs to companies with the old `link_companies()` (adds companies seen for the first time).
 6. Closes jobs not seen for `EXPIRE_DAYS` (default 7) with `expire_jobs()`: sets `jobs.closed_at`.
 
 `category` (the site's tabs) comes from the `category` input, else the keyword's category in `search_keywords`, else
@@ -85,7 +123,9 @@ with a message saying what's wrong, rather than silently filtering out every job
 
 ## Output
 
-Each run uploads an artifact **jobs-&lt;run number&gt;** (kept 30 days), downloadable from the run page:
+Each run uploads an artifact **jobs-&lt;run number&gt;** (kept 30 days), downloadable from the run page. A single
+search's files are at its top; a planned run puts each search's in its own folder (`01-linkedin-react-developer-in-pune/`)
+and adds `summary.md`, a table of the searches with what each saved:
 
 | File | For |
 | --- | --- |
@@ -119,8 +159,10 @@ are left out of the rows, so an upsert keeps their values.
 ## Settings
 
 Workflow inputs map to environment variables read by `scrape.py` (`SEARCH_TERM`, `LOCATION`, `HOURS_OLD`,
-`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`, `CATEGORY`, `DRY_RUN`). `DATABASE_URL`, `EXPIRE_DAYS`, `SEARCH_NAME`, `DISTANCE` (miles,
-default 50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
+`RESULTS`, `JOB_TYPE`, `EXPERIENCE`, `EXCLUDE`, `COMPANY_IDS`, `EASY_APPLY`, `SORT`, `CATEGORY`, `MODE`, `DRY_RUN`); in
+plan mode they're the defaults the lists' own settings override. `DATABASE_URL`, `EXPIRE_DAYS`, `KNOWN_DAYS`,
+`SKIP_KNOWN`, `MAX_TASKS`, `DEFAULT_INTERVAL_HOURS`, `TIME_BUDGET_MINUTES`, `SEARCH_NAME`, `DISTANCE` (miles, default
+50), `SCAN_LIMIT` and `OUT_DIR` can be set as environment variables only. If LinkedIn starts blocking GitHub's runners
 (empty results, 429s), add a repo secret `PROXIES` with comma-separated `user:pass@host:port` proxies. Requests
 LinkedIn rate-limits (429) or fails (5xx) are retried twice, after 5 and 15 seconds, before a page is given up on.
 
@@ -133,6 +175,23 @@ LinkedIn's User Agreement and gets accounts restricted.
 pip install -r requirements.txt
 cp .env.example .env              # optional: settings for local runs (gitignored)
 SEARCH_TERM="data engineer" EXPERIENCE="entry level" python scrape.py     # writes out/, open out/report.html
+MODE=plan-only DATABASE_URL=... python scrape.py                           # what the schedule would search next
+pytest tests
 ```
 
 `scrape.py` reads `.env` on start; variables set in the environment (as above) win over it.
+
+## Code
+
+| File | |
+| --- | --- |
+| `scrape.py` | the run: mode, searches, outputs, saving |
+| `search.py` | one search's settings (`Search`), from the environment or the lists |
+| `planner.py` | which searches are due |
+| `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now |
+| `report.py` | `jobs.json`, `jobs.csv`, `jobs.md`, `report.html`, `summary.md` |
+| `db.py`, `schema.sql`, `seed.sql` | Supabase |
+| `tests/` | `pytest tests`: LinkedIn against saved pages, the planner; `TEST_DATABASE_URL` (a throwaway Postgres with the old project's schema) adds the database tests |
+
+A new platform (Naukri, …) is a new `sources/<name>.py` with `NAME`, `LABEL`, `problems(search)` and
+`run(search, known)` returning rows shaped like `public.jobs`, added to `sources.AVAILABLE` and the `sources` table.
