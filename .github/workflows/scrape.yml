@@ -1,7 +1,8 @@
 name: Scrape jobs
 
 # Runs scrape.py (LinkedIn) and uploads what it writes (jobs.json, jobs.csv, jobs.md, report.html) as the run's
-# artifact "jobs-<run number>". No schedule: start it with the Run workflow button or the API.
+# artifact "jobs-<run number>". Runs every 10 minutes on GitHub's schedule (looking back 1 hour), and on demand
+# with the Run workflow button or the API.
 on:
   workflow_dispatch:
     inputs:
@@ -40,6 +41,8 @@ on:
         type: choice
         options: [recent, relevant]
         default: recent
+  schedule:
+    - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
   push:
     branches: [main]
     paths: ['scrape.py', 'requirements.txt', '.github/workflows/scrape.yml']
@@ -67,7 +70,7 @@ jobs:
         env:
           SEARCH_TERM: ${{ inputs.search_term }}
           LOCATION: ${{ inputs.location }}
-          HOURS_OLD: ${{ inputs.hours_old }}
+          HOURS_OLD: ${{ github.event_name == 'schedule' && '1' || inputs.hours_old }}   # scheduled: the last hour
           RESULTS: ${{ inputs.results }}
           JOB_TYPE: ${{ inputs.job_type }}
           EXPERIENCE: ${{ inputs.experience }}
@@ -82,4 +85,4 @@ jobs:
           name: jobs-${{ github.run_number }}
           path: out/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: ${{ github.event_name == 'schedule' && 7 || 30 }}   # 144 scheduled runs a day

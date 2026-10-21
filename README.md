@@ -6,8 +6,14 @@ you're not logged in. Every job comes with its full description.
 
 ## Run it
 
-Actions → **Scrape jobs** → **Run workflow**, fill in the form (every field has a default). It also runs on a push
-to `main` that changes the scraper, with the defaults. There is no schedule; to start it from n8n or a script:
+**On a schedule:** GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) with the defaults, except that
+scheduled runs only look at jobs posted in the last hour (`hours_old: 1`), so each run overlaps the previous one
+without re-scraping the whole day. Their artifacts are kept 7 days. GitHub starts scheduled runs on a best-effort
+basis (often a few minutes late, occasionally skipped under load), only from `main`, and pauses them after 60 days
+without repository activity. To pause it, disable the workflow under Actions → **Scrape jobs** → **⋯**.
+
+**On demand:** Actions → **Scrape jobs** → **Run workflow**, fill in the form (every field has a default). It also
+runs on a push to `main` that changes the scraper, with the defaults. To start it from n8n or a script:
 
 ```
 POST https://api.github.com/repos/<owner>/scrap-py/actions/workflows/scrape.yml/dispatches
