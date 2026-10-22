@@ -78,3 +78,31 @@ def test_single_search_lists_are_added_inactive(conn):
     assert active is False
     again = db.ensure_search(conn, DEFAULTS.but(term="rust developer", location="kochi", name="x"))
     assert (again.keyword_id, again.location_id) == (search.keyword_id, search.location_id)
+
+
+def test_schema_applied_once_and_runs_take_turns(conn):
+    import threading
+
+    import db
+    conn.execute("DELETE FROM scrap_py_schema")
+    assert db.apply_schema(conn) is True        # changed (no digest yet): applied
+    assert db.apply_schema(conn) is False       # unchanged: skipped
+
+    # Runs starting together after a change: one applies the SQL, the others wait for it and skip.
+    conn.execute("DELETE FROM scrap_py_schema")
+    results, errors = [], []
+
+    def start():
+        try:
+            c = db.connect(URL)
+            results.append(c.execute("SELECT digest FROM scrap_py_schema").fetchone()[0])
+            c.close()
+        except Exception as e:      # a deadlock would land here
+            errors.append(e)
+
+    threads = [threading.Thread(target=start) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert errors == [] and results == [db.schema_digest()] * 4
