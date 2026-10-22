@@ -1,0 +1,17 @@
+{
+  "name": "scrap-py-posts",
+  "private": true,
+  "type": "module",
+  "description": "LinkedIn hiring-alert posts and their pictures, written from the jobs in Supabase",
+  "scripts": {
+    "posts": "node linkedin-posts.js",
+    "test": "node --test linkedin-posts.test.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "pg": "^8.23.1"
+  }
+}
