@@ -195,9 +195,10 @@ BEGIN
     RETURN n;
 END $$;
 
--- The website reads only these views, with Supabase's public anon key. The base tables have RLS on
--- and no policies, so that key can't read raw data, job-poster details or runs (descriptions only through
--- public_job, for the job pages). The views run as their owner, which is why they can still read jobs.
+-- The website reads only these views, with Supabase's public anon key. The base tables have RLS on,
+-- so that key can't read raw data, job-poster details or runs (descriptions only through
+-- public_job, for the job pages). schema.sql makes the views run as the reader and lets that key read just the
+-- columns and rows they show.
 ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
 -- Only when it doesn't exist yet: schema.sql redefines it with more columns ("companyLogo", "places"), which a
 -- CREATE OR REPLACE with these columns would try to drop.

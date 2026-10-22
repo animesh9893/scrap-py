@@ -133,7 +133,7 @@ CREATE OR REPLACE VIEW public_jobs AS
            j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
            j.first_seen_at AS "firstSeenAt", j.company_slug AS "companySlug",
            COALESCE(c.is_premium, false) AS "companyPremium", j.role, j.level, j.tags,
-           COALESCE(c.logo_url, j.raw->>'companyLogo') AS "companyLogo",
+           COALESCE(c.logo_url, j.company_logo) AS "companyLogo",
            ARRAY(SELECT DISTINCT l.name FROM job_search_hits h JOIN locations l ON l.id = h.location_id
                  WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.name) AS places
     FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
@@ -175,5 +175,57 @@ DO $$ BEGIN
         REVOKE ALL ON sources, search_keywords, locations, job_search_hits, company_stats FROM anon, authenticated;
         REVOKE EXECUTE ON FUNCTION upsert_jobs(JSONB), expire_jobs(INTEGER) FROM PUBLIC, anon, authenticated;
         GRANT SELECT ON public_jobs, public_job_hiring, public_locations TO anon, authenticated;
+    END IF;
+END $$;
+
+-- The site's views run as the person reading them (security_invoker), not as their owner, so the site's public key
+-- gets no more than it could read itself (Supabase's "Security Definer View" check). That key may read, from the
+-- tables under them, only the columns these views show (never jobs.raw or the job poster's details beyond public_job_hiring), and only the rows they
+-- show: jobs that weren't skipped. Last in this file, as base.sql and the views above re-create the views (which
+-- drops the option) and base.sql revokes the tables from anon on every run.
+DO $$ BEGIN
+    ALTER VIEW public_jobs SET (security_invoker = true);
+    ALTER VIEW public_job SET (security_invoker = true);
+    ALTER VIEW public_job_hiring SET (security_invoker = true);
+    ALTER VIEW public_job_counts SET (security_invoker = true);
+    ALTER VIEW public_categories SET (security_invoker = true);
+    ALTER VIEW public_companies SET (security_invoker = true);
+    ALTER VIEW public_company_salaries SET (security_invoker = true);
+    ALTER VIEW public_locations SET (security_invoker = true);
+    ALTER VIEW public_linkedin_posts SET (security_invoker = true);
+    ALTER VIEW public_post_images SET (security_invoker = true);
+    ALTER VIEW public_alert_jobs SET (security_invoker = true);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        GRANT SELECT (source, job_id, title, company, location, category, workplace, url, apply_url, salary, description,
+                      posted_at, employment_type, seniority, first_seen_at, company_slug, role, level, tags, status,
+                      company_logo, hiring_manager_name, hiring_manager_title, hiring_manager_url)
+            ON jobs TO anon, authenticated;
+        GRANT SELECT (slug, name, domain, is_premium, sort_order, logo_url, employees, glassdoor_rating)
+            ON companies TO anon, authenticated;
+        GRANT SELECT (company_slug, job_title, currency, min_annual, median_annual, max_annual,
+                      min_usd, median_usd, max_usd, fetched_at, query)
+            ON company_salaries TO anon, authenticated;
+        GRANT SELECT (slug, label, sort_order) ON categories TO anon, authenticated;
+        GRANT SELECT (id, name, country, priority, is_active) ON locations TO anon, authenticated;
+        GRANT SELECT (source, job_id, location_id) ON job_search_hits TO anon, authenticated;
+        GRANT SELECT (id, person, status, body, linkedin_url, created_at, posted_at, image) ON posts TO anon, authenticated;
+        GRANT SELECT (post_id, source, job_id, position) ON post_jobs TO anon, authenticated;
+
+        DROP POLICY IF EXISTS site_read ON jobs;
+        CREATE POLICY site_read ON jobs FOR SELECT TO anon, authenticated USING (status <> 'skipped');
+        DROP POLICY IF EXISTS site_read ON companies;
+        CREATE POLICY site_read ON companies FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON company_salaries;
+        CREATE POLICY site_read ON company_salaries FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON categories;
+        CREATE POLICY site_read ON categories FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON locations;
+        CREATE POLICY site_read ON locations FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON job_search_hits;
+        CREATE POLICY site_read ON job_search_hits FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON posts;
+        CREATE POLICY site_read ON posts FOR SELECT TO anon, authenticated USING (true);
+        DROP POLICY IF EXISTS site_read ON post_jobs;
+        CREATE POLICY site_read ON post_jobs FOR SELECT TO anon, authenticated USING (true);
     END IF;
 END $$;
