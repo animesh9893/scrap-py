@@ -59,6 +59,18 @@ def test_rows_filters_and_known_jobs(monkeypatch):
     assert row["employment_type"] == "Full-time"
     assert row["raw"]["applicants"] == 42 and row["raw"]["apply_type"] == "easy_apply"
     assert row["raw"]["experience_years"] == {"min": 3, "max": 5}
+    assert row["raw"]["hiring_team"] == [{"name": "Priya Sharma", "title": "Engineering Manager at Acme Labs",
+                                          "url": "https://www.linkedin.com/in/priya-sharma-1a2b3c"}]
+    assert result.meta["counts"]["with_hiring_team"] == 1
+
+
+def test_hiring_team_by_heading_and_none():
+    from bs4 import BeautifulSoup
+    html = """<div><h2>Meet the hiring team</h2><a href="https://uk.linkedin.com/in/sam?trk=x">Sam  Lee</a>
+              <a href="https://uk.linkedin.com/in/sam">Sam Lee</a></div>"""
+    assert linkedin.hiring_team(BeautifulSoup(html, "html.parser")) == [
+        {"name": "Sam Lee", "title": None, "url": "https://www.linkedin.com/in/sam"}]
+    assert linkedin.hiring_team(BeautifulSoup("<p>No team</p>", "html.parser")) == []
 
 
 def test_source_location_is_what_linkedin_is_asked(monkeypatch):

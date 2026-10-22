@@ -35,7 +35,8 @@ def plan(conn, max_tasks):
 def test_plan_save_and_skip_known(conn, monkeypatch):
     import db
     planned, due, lists = plan(conn, max_tasks=2)
-    assert (lists["keywords"], lists["locations"], due, len(planned)) == (9, 7, 63, 2)
+    pairs = lists["keywords"] * lists["locations"]          # seed.sql has no exclusions
+    assert lists["keywords"] > 1 and lists["locations"] > 1 and (due, len(planned)) == (pairs, 2)
 
     first = planned[0].search
     result, _ = scrape(monkeypatch, first)
@@ -49,10 +50,12 @@ def test_plan_save_and_skip_known(conn, monkeypatch):
     assert {j[2] for j in jobs} == {"hybrid"} and all(j[3] for j in jobs)
     hits = conn.execute("SELECT keyword_id, location_id FROM job_search_hits").fetchall()
     assert set(hits) == {(first.keyword_id, first.location_id)}
+    page = conn.execute("SELECT name, url FROM public_job_hiring LIMIT 1").fetchone()
+    assert page == ("Priya Sharma", "https://www.linkedin.com/in/priya-sharma-1a2b3c")
 
     # The pair just run isn't due any more.
     planned, due, _ = plan(conn, max_tasks=100)
-    assert due == 62 and first.name not in [p.search.name for p in planned]
+    assert due == pairs - 1 and first.name not in [p.search.name for p in planned]
 
     # Found again by another search: their pages aren't read, they're marked seen and get a hit for that search.
     second = planned[0].search

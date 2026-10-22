@@ -140,6 +140,23 @@ CREATE OR REPLACE VIEW public_jobs AS
     WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
 CREATE INDEX IF NOT EXISTS job_search_hits_job ON job_search_hits (source, job_id);
 
+-- Who posted the job, from LinkedIn's "Meet the hiring team" box (raw.hiring_team, the poster first), for
+-- automations and the job page. Most jobs don't show one.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hiring_manager_name TEXT
+    GENERATED ALWAYS AS (raw->'hiring_team'->0->>'name') STORED;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hiring_manager_title TEXT
+    GENERATED ALWAYS AS (raw->'hiring_team'->0->>'title') STORED;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS hiring_manager_url TEXT
+    GENERATED ALWAYS AS (raw->'hiring_team'->0->>'url') STORED;
+
+-- The job page's hiring manager (web/job.html): the name, headline and LinkedIn profile link LinkedIn shows
+-- publicly on the job. Its own view rather than columns on public_job, which base.sql (and older copies of this
+-- code still running elsewhere) redefine with a fixed column list.
+CREATE OR REPLACE VIEW public_job_hiring AS
+    SELECT j.job_id AS id, j.hiring_manager_name AS name, j.hiring_manager_title AS title, j.hiring_manager_url AS url
+    FROM jobs j
+    WHERE j.status <> 'skipped' AND j.hiring_manager_url IS NOT NULL;
+
 -- The site's location filter: active locations, grouped by country, with how many listed jobs each has.
 CREATE OR REPLACE VIEW public_locations AS
     SELECT l.name, l.country, l.priority,
@@ -157,6 +174,6 @@ DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         REVOKE ALL ON sources, search_keywords, locations, job_search_hits, company_stats FROM anon, authenticated;
         REVOKE EXECUTE ON FUNCTION upsert_jobs(JSONB), expire_jobs(INTEGER) FROM PUBLIC, anon, authenticated;
-        GRANT SELECT ON public_jobs, public_locations TO anon, authenticated;
+        GRANT SELECT ON public_jobs, public_job_hiring, public_locations TO anon, authenticated;
     END IF;
 END $$;
