@@ -158,6 +158,7 @@ class FilteredLinkedIn(LinkedIn):
             "applicants_text": applicants.get_text(" ", strip=True) if applicants else None,
             "apply_type": "easy_apply" if "public_jobs_apply-link-onsite" in controls else
                           "company_site" if any(c.startswith("public_jobs_apply-link-offsite") for c in controls) else None,
+            "hiring_team": hiring_team(soup),
         }
         return {
             **description_fields(markup.prettify(formatter="html") if markup else None, DescriptionFormat.HTML),
@@ -341,6 +342,37 @@ def find_workplace(title, location, description):
     return None, None
 
 
+def profile_url(href):
+    """https://www.linkedin.com/in/<id> from a profile link on a job page (any country subdomain, tracking dropped)."""
+    match = re.search(r"linkedin\.com/in/([^/?#]+)", href or "")
+    return f"https://www.linkedin.com/in/{match[1]}" if match else None
+
+
+def hiring_team(soup):
+    """The "Meet the hiring team" box some job pages show signed out: [{name, title, url}], the job poster first.
+    Empty for most jobs (agencies, ATS postings, or LinkedIn hiding it)."""
+    box = soup.find(class_=re.compile(r"message-the-recruiter|hiring-team"))
+    if box is None:
+        heading = soup.find(lambda tag: tag.name in ("h2", "h3") and re.search(
+            r"hiring team|job poster", tag.get_text(" ", strip=True), re.I))
+        box = heading.parent if heading else None
+    if box is None:
+        return []
+    team, seen = [], set()
+    for link in box.find_all("a", href=True):
+        url = profile_url(link["href"])
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        card = link.find_parent(class_=re.compile(r"base-card|base-main-card")) or link
+        name = card.find(class_=re.compile(r"base-main-card__title")) or card.find(class_="sr-only") or link
+        title = card.find(class_=re.compile(r"base-main-card__subtitle"))
+        team.append({"name": " ".join(name.get_text(" ", strip=True).split()) or None,
+                     "title": " ".join(title.get_text(" ", strip=True).split()) if title else None,
+                     "url": url})
+    return team
+
+
 def company_slug(company_url):
     match = re.search(r"/company/([^/?#]+)", company_url or "")
     return match[1].lower() if match else None
@@ -396,6 +428,7 @@ def row(job, posted_ago, extras, scraped_at, search):
             "applicants": applicant_count(extras.get("applicants_text")),
             "applicants_text": extras.get("applicants_text"),
             "apply_type": apply_type,                  # easy_apply | company_site
+            "hiring_team": extras.get("hiring_team", []),   # [{name, title, url}]: who posted it, from the job page
             "salary_min": job.min_amount,
             "salary_max": job.max_amount,
             "salary_currency": job.currency,
@@ -439,7 +472,8 @@ def run(search, known=frozenset()):
         "filters": search.filters(),
         "counts": dict(kept=len(rows), scanned=scraper.scanned, skipped=dict(scraper.skipped),
                        without_description=sum(not r["description"] for r in rows),
-                       stopped_at_scan_limit=scraper.hit_scan_limit, scan_limit=search.scan_limit),
+                       stopped_at_scan_limit=scraper.hit_scan_limit, scan_limit=search.scan_limit,
+                       with_hiring_team=sum(bool(r["raw"]["hiring_team"]) for r in rows)),
         "error": scraper.error,
         "warnings": scraper.warnings,
     }

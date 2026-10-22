@@ -64,7 +64,8 @@ def markdown(meta, rows):
                   f"{cell(r['employment_type'])} | {cell(r['seniority'])} | {cell(r['salary'])} | "
                   f"{cell(r['raw']['applicants_text'])} |" for r in rows]
     counts = meta["counts"]
-    lines += ["", f"Looked at {counts['scanned']} jobs, kept {counts['kept']}."]
+    lines += ["", f"Looked at {counts['scanned']} jobs, kept {counts['kept']}"
+                  f"{f', {n} with a hiring manager' if (n := counts.get('with_hiring_team')) else ''}."]
     if skipped_text(meta):
         lines[-1] += f" {skipped_text(meta).capitalize()}."
     if counts["stopped_at_scan_limit"]:

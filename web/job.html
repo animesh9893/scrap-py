@@ -65,6 +65,9 @@
   .facts div { background: var(--bg); border-radius: 10px; padding: 8px 12px; }
   .facts dt { font-size: 12px; color: var(--muted); }
   .facts dd { margin: 0; font-weight: 600; }
+  .hirer { margin: 16px 0 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+  .hirer .k { font-size: 12px; color: var(--muted); }
+  .hirer a { font-weight: 600; }
   .actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 18px; }
   .note { color: var(--muted); font-size: 13px; }
   h2 { font-size: 16px; margin: 24px 0 8px; }
@@ -252,6 +255,11 @@ function render(j, salaries = []) {
   const apply = link && el('a', { className: 'btn apply', href: link, target: '_blank', rel: 'noopener nofollow',
     textContent: onLinkedIn ? 'Apply on LinkedIn ↗' : 'Apply now ↗' });
   const desc = j.description && el('div', { className: 'desc', textContent: j.description });
+  const hirerUrl = safeUrl(j.hiringManagerUrl);
+  const hirer = hirerUrl && el('div', { className: 'hirer' },
+    el('div', { className: 'k', textContent: 'Hiring manager' }),
+    el('a', { href: hirerUrl, target: '_blank', rel: 'noopener nofollow', textContent: `${j.hiringManagerName || 'LinkedIn profile'} ↗` }),
+    j.hiringManagerTitle && el('div', { className: 'note', textContent: j.hiringManagerTitle }));
 
   $('main').replaceChildren(el('article', { className: 'job' },
     el('div', { className: 'head' },
@@ -269,6 +277,7 @@ function render(j, salaries = []) {
     el('div', { className: 'actions' },
       apply ?? el('span', { className: 'note', textContent: 'This listing has no link to apply.' }),
       apply && el('span', { className: 'note', textContent: onLinkedIn ? 'Opens the job on LinkedIn in a new tab.' : 'Opens the job post in a new tab.' })),
+    hirer,
     salarySection(j, salaries, match),
     desc && el('h2', { textContent: 'About the job' }),
     desc,
@@ -317,6 +326,12 @@ try {
       const { data } = await db.from('public_company_salaries').select('*').eq('companySlug', job.companySlug)
         .order('median', { ascending: false });
       salaries = (data ?? []).map((s) => ({ ...s, min: Number(s.min), median: Number(s.median), max: Number(s.max) }));
+    }
+    if (job) {
+      // Most jobs have none; the view doesn't exist until the scraper's next run, so errors are ignored.
+      const { data } = await db.from('public_job_hiring').select('name,title,url').eq('id', id).limit(1);
+      const h = data?.[0];
+      if (h) job = { ...job, hiringManagerName: h.name, hiringManagerTitle: h.title, hiringManagerUrl: h.url };
     }
     job ? render(job, salaries) : notFound();
     const { data: others } = await db.from('public_jobs').select('id,title,company,location,companySlug,firstSeenAt')
