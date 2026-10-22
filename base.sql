@@ -87,6 +87,10 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 CREATE INDEX IF NOT EXISTS companies_name_keys ON companies USING gin (name_keys);
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+-- The companies LinkedIn posts feature, set by premium.sql: 1 = the big names posts are made of, 2 = big IT
+-- services and Big 4 (premium on the site, never in posts). hashtag: the brand's own tag (#google), for posts.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS premium_tier SMALLINT;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS hashtag TEXT;
 
 -- Glassdoor salaries, one row per job title, cached per company for salaries.refreshDays (config).
 ALTER TABLE companies ADD COLUMN IF NOT EXISTS salaries_fetched_at TIMESTAMPTZ;
@@ -293,7 +297,20 @@ CREATE TABLE IF NOT EXISTS post_jobs (
 ALTER TABLE posts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE post_jobs ENABLE ROW LEVEL SECURITY;
 
--- Jobs worth a post: first seen in the last 3 days, in no post yet, at most 2 per company, best first.
+-- Whether a job is for the LinkedIn posts' readers: an entry or mid level software role. The title must name a
+-- software job, nothing senior (senior, lead, staff, manager, architect, VP, "Engineer 4" or "IV" and up; "Software
+-- Engineer III" stays in), and not support, sales, consulting or other non-dev work; LinkedIn's seniority must not be
+-- director, executive or internship.
+CREATE OR REPLACE FUNCTION post_job_ok(title TEXT, seniority TEXT) RETURNS BOOLEAN LANGUAGE sql IMMUTABLE AS $$
+    SELECT COALESCE(seniority, '') !~* '^(director|executive|internship)$'
+       AND title ~* '(engineer|developer|\msde|programmer|software|scientist|data analyst|devops|\msre\M|full ?stack|front ?end|back ?end|android|\mios\M|mobile|machine learning|\mml\M|\mai\M|\mllm|cloud|security|\mqa\M|\mtest|automation)'
+       AND title !~* '\m(senior|sr|lead|principal|staff|manager|director|head|architect|vp|avp|vice president|chief|distinguished|fellow|advisory|intern|internship)\M'
+       AND title !~* '(engineer|developer|scientist|analyst)\s*[-,]?\s*(iv|v|vi|[4-9])\M'
+       AND title !~* '(support|customer|help ?desk|service desk|technical account|\msales\M|pre-?sales|recruit|\mbpo\M|voice process|call cent|desktop|operator|administrator|consultant|functional|business analyst|trainer|instructor|tutor|annotat|data entry|content|writer|contractor)'
+$$;
+
+-- Jobs worth a post: entry and mid level software jobs (post_job_ok) at tier 1 premium companies with a real
+-- logo (premium.sql), first seen in the last 3 days, in no post yet, at most 2 per company, best first.
 -- A job is left out when the same company's same title (ignoring case and punctuation) is newer in this list
 -- or was already in a post in the last 30 days: LinkedIn often lists one opening several times, under new ids
 -- or once per city.
@@ -316,8 +333,9 @@ CREATE OR REPLACE VIEW post_candidates AS
                                   ORDER BY j.first_seen_at DESC, j.job_id) AS nth_of_title,
                j.salary, j.apply_url
         FROM jobs j
+        JOIN companies c ON c.slug = j.company_slug AND c.premium_tier = 1 AND c.logo_url LIKE '%media.licdn.com%'
         LEFT JOIN company_index ci ON ci.slug = j.company_slug
-        WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '3 days'
+        WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '3 days' AND post_job_ok(j.title, j.seniority)
           AND NOT EXISTS (SELECT 1 FROM post_jobs pj WHERE pj.source = j.source AND pj.job_id = j.job_id)
           AND NOT EXISTS (
               SELECT 1 FROM post_jobs pj

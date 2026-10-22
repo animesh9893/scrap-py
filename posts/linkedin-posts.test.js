@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitJobs, buildPost, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags } from './linkedin-posts.js';
+import { splitJobs, buildPost, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, companyNames } from './linkedin-posts.js';
 import { postImageSvg, renderPostImage, pickCompanies, loadLogos, MAX_FEATURED } from './post-image.js';
 
 const people = [{ id: 'animesh' }, { id: 'sachin' }];
@@ -19,7 +19,7 @@ test('a short list goes to whoever still has room', () => {
 
 test('post follows the template and passes the check', () => {
     const body = buildPost({
-        id: 42, siteUrl: 'https://jobs.example.com/', hashtags: ['hiring'],
+        id: 42, siteUrl: 'https://jobs.example.com/', hashtags: ['hiring'], subtitle: '💼 Entry and mid level software roles',
         jobs: [
             job(1, { tags: ['React', 'TypeScript'], pay: '~₹24L/yr on Glassdoor', url: 'https://in.linkedin.com/jobs/view/engineer-1-at-co-4123456789' }),
             job(2, { tags: ['React'], workplace: 'remote', url: 'https://www.linkedin.com/jobs/view/4123456790/' }),
@@ -27,8 +27,9 @@ test('post follows the template and passes the check', () => {
         ],
     });
     const lines = body.split('\n');
-    assert.equal(lines[0], '🚀 𝗛𝗶𝗿𝗶𝗻𝗴 𝗮𝗹𝗲𝗿𝘁: 𝟯 𝗻𝗲𝘄 𝗼𝗽𝗲𝗻𝗶𝗻𝗴𝘀 𝗮𝘁 𝟯 𝗰𝗼𝗺𝗽𝗮𝗻𝗶𝗲𝘀');
-    assert.deepEqual(lines.slice(2, 11), [
+    assert.equal(plain(lines[0]), '🚀 Hiring alert: 3 new openings at Co 0, Co 1 & Co 2');
+    assert.equal(lines[1], '💼 Entry and mid level software roles');
+    assert.deepEqual(lines.slice(3, 12), [
         '1. 𝗖𝗼 𝟭: Engineer 1 · 𝘉𝘦𝘯𝘨𝘢𝘭𝘶𝘳𝘶',
         '💰 ~₹24L/yr on Glassdoor',
         '🔗 https://jobs.example.com/job.html?id=j1',
@@ -42,7 +43,7 @@ test('post follows the template and passes the check', () => {
     assert.doesNotMatch(body, /linkedin\.com/);
     assert.match(plain(body), /🔥 In demand: React, C\+\+, TypeScript/);
     assert.match(body, /https:\/\/jobs\.example\.com\/$/m);
-    assert.equal(lines.at(-1), '#hiring #react #cpp #typescript #bengalurujobs #remotejobs #co0 #co1 #co2');
+    assert.equal(lines.at(-1), '#hiring #opentowork #bangalorejobs');
     assert.deepEqual(checkPost(body), []);
 });
 
@@ -103,16 +104,26 @@ test('the n8n workflow runs the same template check', async () => {
     assert.equal(code.split('function plain(').length, 2, 'plain() is in the workflow once');
 });
 
-test('hashtags: configured ones, then roles, tech, cities, companies and filler, without repeats, up to the limit', () => {
+test('hashtags: core ones, audience, the two biggest companies, the main role and city, at most the limit', () => {
     const jobs = [
-        job(1, { role: 'backend', tags: ['Java', 'Kafka'] }),
-        job(2, { role: 'backend', tags: ['Java'], location: 'Pune, Maharashtra, India' }),
-        job(3, { role: 'ml', tags: ['Machine Learning'], workplace: 'remote' }),
+        job(1, { role: 'backend', company: 'Amazon', company_tag: 'amazon', seniority: 'Mid-Senior level' }),
+        job(2, { role: 'backend', company: 'Amazon', company_tag: 'amazon', location: 'Greater Kolkata Area' }),
+        job(3, { role: 'ml', company: 'Google', company_tag: 'google', seniority: 'Entry level', location: 'Greater Kolkata Area' }),
+        job(4, { role: 'backend', company: 'Meta', company_tag: 'meta', location: 'Greater Kolkata Area' }),
     ];
-    assert.deepEqual(postHashtags(jobs, ['hiring', 'MachineLearning'], 30, ['jobs', 'Hiring']),
-        ['hiring', 'machinelearning', 'backenddeveloper', 'java', 'kafka', 'bengalurujobs', 'punejobs', 'remotejobs',
-            'co0', 'co1', 'co2', 'jobs']);
-    assert.equal(postHashtags(jobs, ['hiring'], 4).length, 4);
+    assert.deepEqual(postHashtags(jobs, ['hiring', 'SoftwareJobs', 'techjobs'], 8),
+        ['hiring', 'softwarejobs', 'techjobs', 'freshers', 'amazon', 'google', 'backenddeveloper', 'kolkatajobs']);
+    assert.equal(postHashtags(jobs, ['hiring', 'softwarejobs', 'techjobs'], 4).length, 4);
+    // No entry level job: #opentowork. Mostly remote: #remotejobs. No brand tag or a long one: left out, not padded.
+    const remote = [job(1, { workplace: 'remote', company_tag: 'averyveryverylongcompanytag' }), job(2, { workplace: 'remote' })];
+    assert.deepEqual(postHashtags(remote, ['hiring'], 8), ['hiring', 'opentowork', 'remotejobs']);
+});
+
+test('heading names the most listed companies first, then how many more', () => {
+    const at = (...names) => names.map((company, i) => job(i, { company }));
+    assert.equal(companyNames(at('Meta', 'Amazon', 'Amazon', 'Google', 'Citi', 'IBM')), 'Amazon, Citi, Google & 2 more');
+    assert.equal(companyNames(at('Meta', 'Amazon', 'Google')), 'Amazon, Google & Meta');
+    assert.equal(companyNames(at('Meta', 'Meta')), 'Meta');
 });
 
 test('picture: the post\'s companies get cards, premium then most jobs first; the strip skips them', () => {
@@ -161,8 +172,8 @@ test('picture: logos fall back to the site icon, then to initials, and text is e
 test('a long post drops hashtags before going over LinkedIn\'s limit', () => {
     const jobs = Array.from({ length: 10 }, (_, i) => job(i, { title: 'Senior Software Engineer II, Backend Platform (Golang)',
         company: `Cencora Global Capability Center ${i}`, tags: ['Go', 'Kubernetes'], pay: '~₹45L/yr on Glassdoor' }));
-    const filler = Array.from({ length: 30 }, (_, i) => `longfillerhashtag${i}`);
-    const body = buildPost({ id: 1, siteUrl: 'https://job-scraper-web-beryl.vercel.app', hashtags: ['hiring'], maxHashtags: 30, fillerHashtags: filler, jobs });
+    const core = Array.from({ length: 30 }, (_, i) => `longhashtag${i}`);
+    const body = buildPost({ id: 1, siteUrl: 'https://job-scraper-web-beryl.vercel.app', hashtags: core, maxHashtags: 30, jobs });
     assert.ok(body.length <= 3000, `${body.length} characters`);
     assert.deepEqual(checkPost(body), []);
 });

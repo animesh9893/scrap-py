@@ -25,7 +25,8 @@ import time
 import psycopg
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql")]   # the old project's tables, then ours
+SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql"),   # the old project's tables, then ours,
+          os.path.join(HERE, "premium.sql")]                                       # then the premium companies
 BATCH = 200      # jobs per upsert_jobs() call
 
 log = logging.getLogger(__name__)

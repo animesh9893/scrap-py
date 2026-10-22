@@ -106,3 +106,64 @@ def test_schema_applied_once_and_runs_take_turns(conn):
     for t in threads:
         t.join()
     assert errors == [] and results == [db.schema_digest()] * 4
+
+
+TITLES = {   # real titles from the jobs table: in a post or not
+    "Software Development Engineer - II, FinTech - Machine Learning": True,
+    "Software Engineer III - Java Full Stack Developer + GenAI / LLM + AWS": True,
+    "Applications Development Intermediate Programmer Analyst": True,
+    "Data Scientist": True,
+    "SDE II, ShipTech/Visibility": True,
+    "Salesforce Developer": True,
+    "Senior Software Engineer": False,
+    "Sr. Java Developer": False,
+    "Lead Data Engineer": False,
+    "Staff Engineer, Platform": False,
+    "Engineering Manager": False,
+    "Python Developer Assistant Vice President": False,
+    "Customer Engineer, Cloud AI, Financial Services, Google Cloud": False,
+    "Technical Support Engineer": False,
+    "Business Analyst (4 to 6 Years) - Lending": False,
+    "Oracle Fusion Accounting Hub – Consultant, Functional Transformation": False,
+    "Technical Engineer Contractor": False,
+    "Software Engineering Intern": False,
+    "Sales Engineer": False,
+    "Recruiter": False,
+    "Full-stack Engineer 5": False,
+    "Data Engineer IV": False,
+    "Advisory Data Scientist - IBM Quantum": False,
+    "Software Engineer-II": True,
+}
+
+
+def test_post_job_ok_keeps_entry_and_mid_software_roles(conn):
+    got = {t: conn.execute("SELECT post_job_ok(%s, 'Mid-Senior level')", (t,)).fetchone()[0] for t in TITLES}
+    assert got == TITLES
+    assert conn.execute("SELECT post_job_ok('Software Engineer', 'Director')").fetchone()[0] is False
+    assert conn.execute("SELECT post_job_ok('Software Engineer', NULL)").fetchone()[0] is True
+
+
+def test_posts_take_only_tier_1_companies_with_a_real_logo(conn):
+    import db
+    logo = "https://media.licdn.com/dms/image/x/logo.png"
+    conn.execute("""INSERT INTO companies (slug, name, logo_url) VALUES
+                        ('google', 'Google', %s), ('infosys', 'Infosys', %s), ('meta', 'Meta', 'https://static.licdn.com/ghost.png'),
+                        ('tiny-startup', 'Tiny Startup', %s)""", (logo, logo, logo))
+    with open(os.path.join(db.HERE, "premium.sql"), encoding="utf-8") as f:
+        conn.execute(f.read())
+    tiers = dict(conn.execute("SELECT slug, premium_tier FROM companies WHERE is_premium").fetchall())
+    assert tiers == {"google": 1, "infosys": 2, "meta": 1}
+    assert conn.execute("SELECT hashtag FROM companies WHERE slug = 'google'").fetchone()[0] == "google"
+
+    for i, (slug, title) in enumerate([("google", "Software Engineer II"), ("google", "Senior Software Engineer"),
+                                       ("google", "Technical Support Engineer"), ("infosys", "Java Developer"),
+                                       ("meta", "Software Engineer"), ("tiny-startup", "Backend Developer")]):
+        conn.execute("""INSERT INTO jobs (source, job_id, title, company, company_slug, seniority)
+                        VALUES ('linkedin', %s, %s, %s, %s, 'Mid-Senior level')""", (str(i), title, slug, slug))
+    rows = conn.execute("SELECT company_slug, title FROM post_candidates").fetchall()
+    assert rows == [("google", "Software Engineer II")]
+
+    # A company taken off the list loses its tier the next time premium.sql runs.
+    conn.execute("UPDATE companies SET premium_tier = 1, is_premium = true WHERE slug = 'tiny-startup'")
+    conn.execute(open(os.path.join(db.HERE, "premium.sql"), encoding="utf-8").read())
+    assert conn.execute("SELECT premium_tier, is_premium FROM companies WHERE slug = 'tiny-startup'").fetchone() == (None, False)
