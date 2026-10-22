@@ -1,7 +1,7 @@
 """Saves scrapes to the Supabase database the old job-scraper (Node) built, over DATABASE_URL (Postgres).
 
   connect()        opens it and applies base.sql (the old project's tables, for a fresh database) and schema.sql
-                   (additive), both safe to repeat
+                   (additive), both safe to repeat, when they changed since the last run (apply_schema())
   known_job_ids()  ids of jobs saved and seen lately, whose job pages a scrape can skip
   ensure_search()  for a search from the environment: its search_keywords / locations rows (added inactive, so a
                    one-off search doesn't join the schedule)
@@ -15,10 +15,12 @@ Rows come from the sources, shaped like public.jobs; to_db_row() turns them into
 the site's views, Telegram alerts and LinkedIn posts read them like any other job.
 """
 
+import hashlib
 import json
 import logging
 import os
 import re
+import time
 
 import psycopg
 
@@ -67,14 +69,51 @@ def to_db_row(r, category):
     return db
 
 
+def schema_digest():
+    h = hashlib.sha256()
+    for path in SCHEMA:
+        with open(path, "rb") as f:
+            h.update(f.read())
+    return h.hexdigest()
+
+
+def apply_schema(conn):
+    """Applies base.sql and schema.sql when they changed since the last run that did. Runs start at the same time
+    (the schedule, a sweep, the posts workflow, pushes in the other repo), and DDL from two of them at once
+    deadlocks, so they take turns on an advisory lock, and only the first after a change runs the SQL."""
+    digest = schema_digest()
+    with conn.transaction():
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext('scrap-py schema'))")
+        if conn.execute("SELECT to_regclass('public.scrap_py_schema') IS NOT NULL").fetchone()[0] and \
+                conn.execute("SELECT 1 FROM scrap_py_schema WHERE digest = %s", (digest,)).fetchone():
+            return False
+        for path in SCHEMA:
+            with open(path, encoding="utf-8") as f:
+                conn.execute(f.read())
+        conn.execute("""CREATE TABLE IF NOT EXISTS scrap_py_schema (
+                            id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1), digest TEXT NOT NULL,
+                            applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
+                        ALTER TABLE scrap_py_schema ENABLE ROW LEVEL SECURITY""")
+        conn.execute("""INSERT INTO scrap_py_schema (id, digest) VALUES (1, %s)
+                        ON CONFLICT (id) DO UPDATE SET digest = EXCLUDED.digest, applied_at = now()""", (digest,))
+    return True
+
+
 def connect(url):
     # Supabase requires TLS; set DATABASE_SSL=false for a local Postgres without it.
     sslmode = "disable" if os.environ.get("DATABASE_SSL") == "false" else "require"
     conn = psycopg.connect(url, sslmode=sslmode, autocommit=True)   # each save is its own transaction()
-    with conn.transaction():
-        for path in SCHEMA:
-            with open(path, encoding="utf-8") as f:
-                conn.execute(f.read())
+    for attempt in range(3):
+        try:
+            if apply_schema(conn):
+                log.info("Applied base.sql and schema.sql")
+            break
+        except psycopg.errors.DeadlockDetected:
+            # Still possible against a run of older code, which applies the SQL every time without the lock.
+            if attempt == 2:
+                raise
+            log.warning("Deadlock applying the schema: trying again")
+            time.sleep(5 * (attempt + 1))
     return conn
 
 

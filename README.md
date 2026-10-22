@@ -212,7 +212,7 @@ pytest tests
 | `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now |
 | `report.py` | `jobs.json`, `jobs.csv`, `jobs.md`, `report.html`, `summary.md` |
 | `db.py`, `schema.sql`, `seed.sql` | Supabase |
-| `tests/` | `pytest tests`: LinkedIn against saved pages, the planner; `TEST_DATABASE_URL` (a throwaway Postgres with the old project's schema) adds the database tests |
+| `tests/` | `pytest tests`: LinkedIn against saved pages, the planner; `TEST_DATABASE_URL` (a throwaway Postgres with the old project's schema) adds the database tests. `.github/workflows/test.yml` runs them all on every pull request and push to main, with a Postgres service |
 
 A new platform (Naukri, …) is a new `sources/<name>.py` with `NAME`, `LABEL`, `problems(search)` and
 `run(search, known)` returning rows shaped like `public.jobs`, added to `sources.AVAILABLE` and the `sources` table.
