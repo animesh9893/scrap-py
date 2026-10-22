@@ -4,10 +4,13 @@ Moved here from the old job-scraper repo (`src/linkedin-posts.js`, `src/post-ima
 Supabase project. Node, separate from the Python scraper: `npm ci` and `npm test` in this folder.
 
 1. **Write posts** (`.github/workflows/posts.yml`, every hour in proj-berry/scrap-py): the best new jobs (view
-   `post_candidates`) are split between the people in `config.js`, so each gets a different set, and one post is
+   `post_candidates`: only entry and mid level software jobs, `post_job_ok()`, at tier 1 premium companies from
+   `../premium.sql`) are split between the people in `config.js`, so each gets a different set, and one post is
    written for each, at most once every `everyHours` (4) per person and only when they'd get `minJobs` (10) jobs.
    Each job goes into one post only, ever. The text links every job to its page on https://krawlr.xyz and ends
-   with the home page; hashtags come from `config.js`, the jobs' categories, cities and companies.
+   with the home page. The heading names the biggest companies ("at Amazon, Meta, Google & 5 more"). At most 8
+   hashtags: the 3 in `config.js`, #freshers (an entry level job) or #opentowork, the two biggest companies' own
+   tags (`companies.hashtag`), the main role and the main city or #remotejobs.
 2. **Picture** (`post-image.js`): a 1080×1350 PNG with the opening count, a card per company (up to 6) with its
    LinkedIn logo, roles and places, a strip of premium companies (`companies.is_premium`) and the site at the
    bottom. Stored in `posts.image`, served by the view `public_post_images`. Fonts: Inter (OFL) in `fonts/`.

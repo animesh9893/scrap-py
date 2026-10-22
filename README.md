@@ -84,7 +84,8 @@ string → URI, session pooler), every run saves its jobs to the database the ol
 Telegram alerts and LinkedIn posts pick them up like any other job. `db.py` does it, each search in its own
 transaction:
 
-1. Applies `schema.sql`: only additions (new tables, columns and functions, below), safe to run every time.
+1. Applies `schema.sql`: only additions (new tables, columns and functions, below), safe to run every time. Then
+   `premium.sql`, the hand-picked premium companies (tier 1 feed the LinkedIn posts; edit the list there).
 2. For a single search, records it in the lists: the search term in `search_keywords`, the location in `locations`
    (added inactive the first time, so a one-off search doesn't join the schedule).
 3. Upserts the jobs with `upsert_jobs()` on `(source, job_id)`. New jobs get the table defaults (`status` new,
@@ -211,7 +212,7 @@ pytest tests
 | `planner.py` | which searches are due |
 | `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now |
 | `report.py` | `jobs.json`, `jobs.csv`, `jobs.md`, `report.html`, `summary.md` |
-| `db.py`, `schema.sql`, `seed.sql` | Supabase |
+| `db.py`, `schema.sql`, `seed.sql`, `premium.sql` | Supabase (`premium.sql`: the premium companies and their hashtags) |
 | `tests/` | `pytest tests`: LinkedIn against saved pages, the planner; `TEST_DATABASE_URL` (a throwaway Postgres with the old project's schema) adds the database tests. `.github/workflows/test.yml` runs them all on every pull request and push to main, with a Postgres service |
 
 A new platform (Naukri, …) is a new `sources/<name>.py` with `NAME`, `LABEL`, `problems(search)` and

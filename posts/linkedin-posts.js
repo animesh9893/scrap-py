@@ -63,6 +63,14 @@ const ROLE_TAGS = {
     design: 'uxdesign', product: 'productmanagement', manager: 'engineeringmanagement',
 };
 
+// The name people tag a city by: LinkedIn's "Greater Kolkata Area" → kolkata, Bengaluru → bangalore.
+const CITY_TAGS = { bengaluru: 'bangalore', gurugram: 'gurgaon', newdelhi: 'delhi', navimumbai: 'mumbai', newyorkcity: 'newyork',
+    sanfranciscobayarea: 'sanfrancisco', bombay: 'mumbai', madras: 'chennai' };
+function cityTag(city) {
+    const name = hashtag(String(city).replace(/^greater\s+/i, '').replace(/\s+(metropolitan\s+)?(area|region)$/i, ''));
+    return name ? `${CITY_TAGS[name] ?? name}jobs` : null;
+}
+
 // The values most jobs share, most common first.
 function mostCommon(values, n) {
     const counts = new Map();
@@ -70,22 +78,32 @@ function mostCommon(values, n) {
     return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([v]) => v);
 }
 
+const MAX_TAG = 20;   // longer ones are nobody's hashtag (#greaterkolkataareajobs)
+
 /**
- * Hashtags for a post: the configured ones, then its jobs' roles, top tech, cities and companies, then the general
- * `filler` ones until there are max.
+ * A post's hashtags, at most `max`, each picked on purpose rather than a wall of them: the configured core ones,
+ * #freshers when a job is entry level (else #opentowork), the brand tags (companies.hashtag, job.company_tag) of the
+ * post's two most listed companies, its most common role and its most common city (or #remotejobs). A slot with
+ * nothing to say is left out, never padded.
  */
-export function postHashtags(jobs, hashtags = [], max = 10, filler = []) {
-    const remote = jobs.some((j) => j.workplace === 'remote');
+export function postHashtags(jobs, core = [], max = 8) {
+    const entry = jobs.some((j) => /^(entry level|internship)$/i.test(j.seniority ?? ''));
     const cities = jobs.filter((j) => j.workplace !== 'remote').map((j) => where(j));
+    const remote = jobs.filter((j) => j.workplace === 'remote').length > cities.length;
     return [...new Set([
-        ...hashtags,
-        ...mostCommon(jobs.map((j) => ROLE_TAGS[j.role]), 4),
-        ...mostCommon(jobs.flatMap((j) => j.tags ?? []), 8).map(hashtag),
-        ...mostCommon(cities, 4).map((c) => `${hashtag(c)}jobs`),
-        ...(remote ? ['remotejobs'] : []),
-        ...mostCommon(jobs.map((j) => j.company), 6).map((c) => hashtag(c)).filter((t) => t.length <= 20),
-        ...filler,
-    ].map(hashtag).filter(Boolean))].slice(0, max);
+        ...core,
+        entry ? 'freshers' : 'opentowork',
+        ...mostCommon(jobs.map((j) => j.company_tag), 2),
+        ...mostCommon(jobs.map((j) => ROLE_TAGS[j.role]), 1),
+        remote ? 'remotejobs' : mostCommon(cities.map(cityTag), 1)[0],
+    ].map((t) => hashtag(t ?? '')).filter((t) => t && t.length <= MAX_TAG))].slice(0, max);
+}
+
+/** "Amazon, Meta, Google & 5 more" (the most listed first), or "Amazon, Meta & Google" when there are three. */
+export function companyNames(jobs, shown = 3) {
+    const names = mostCommon(jobs.map((j) => j.company), Infinity);
+    if (names.length <= shown) return names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names.at(-1)}` : names[0] ?? '';
+    return `${names.slice(0, shown).join(', ')} & ${names.length - shown} more`;
 }
 
 // 2450000 INR → "₹24L", 850000 → "₹8.5L"; 132000 USD → "$132k".
@@ -124,18 +142,17 @@ export function jobLink({ job_id: jobId, url, apply_url: applyUrl }, siteUrl) {
 }
 
 /**
- * The post text: a bold heading; for each job a numbered line (company in bold, place in italics), its pay when
+ * The post text: a bold heading naming the biggest companies, the subtitle; for each job a numbered line (company in bold, place in italics), its pay when
  * known (job.pay, see payFor) and its link to the job's page on the site (see jobLink); the most named tech; a link to the
  * board's home page; hashtags.
  * Job titles and hashtags stay plain so LinkedIn search finds them.
  */
-export function buildPost({ id, jobs, siteUrl, hashtags = [], maxHashtags = 10, fillerHashtags = [] }) {
-    const companies = new Set(jobs.map((j) => j.company)).size;
+export function buildPost({ id, jobs, siteUrl, hashtags = [], maxHashtags = 8, subtitle = '' }) {
     const top = mostCommon(jobs.flatMap((j) => j.tags ?? []), 3);
-    const tags = postHashtags(jobs, hashtags, maxHashtags, fillerHashtags);
-    // Over LinkedIn's limit: drop hashtags from the end first (down to 5), before any job has to go.
+    const tags = postHashtags(jobs, hashtags, maxHashtags);
+    // Over LinkedIn's limit: drop hashtags from the end first (down to 3), before any job has to go.
     let body = text(tags);
-    while (body.length > MAX_CHARS && tags.length > 5) {
+    while (body.length > MAX_CHARS && tags.length > 3) {
         tags.pop();
         body = text(tags);
     }
@@ -143,7 +160,8 @@ export function buildPost({ id, jobs, siteUrl, hashtags = [], maxHashtags = 10, 
 
     function text(tags) {
         return [
-            `🚀 ${bold(`Hiring alert: ${jobs.length} new opening${jobs.length === 1 ? '' : 's'} at ${companies} compan${companies === 1 ? 'y' : 'ies'}`)}`,
+            `🚀 ${bold(`Hiring alert: ${jobs.length} new opening${jobs.length === 1 ? '' : 's'} at ${companyNames(jobs)}`)}`,
+            ...(subtitle ? [subtitle] : []),
             '',
             ...jobs.flatMap((j, i) => [
                 `${i + 1}. ${bold(j.company)}: ${j.title}${where(j) ? ` · ${italic(where(j))}` : ''}`,
@@ -244,9 +262,11 @@ async function main() {
     const made = [];
     try {
         // scrap-py sets jobs.category rather than role; it gives the role hashtags (ai → #machinelearning).
+        // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql).
         const { rows: candidates } = await store.query(
-            `SELECT pc.*, COALESCE(pc.role, CASE j.category WHEN 'ai' THEN 'ml' ELSE j.category END) AS role
-             FROM post_candidates pc JOIN jobs j USING (source, job_id)
+            `SELECT pc.*, COALESCE(pc.role, CASE j.category WHEN 'ai' THEN 'ml' ELSE j.category END) AS role,
+                    j.seniority, c.hashtag AS company_tag
+             FROM post_candidates pc JOIN jobs j USING (source, job_id) LEFT JOIN companies c ON c.slug = pc.company_slug
              ORDER BY pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
         const { rows: salaries } = await store.query(
             `SELECT company_slug, query, currency, median_annual::float AS median FROM company_salaries
@@ -266,11 +286,11 @@ async function main() {
                 continue;
             }
             const { rows: [{ id }] } = await store.query('INSERT INTO posts (person) VALUES ($1) RETURNING id', [person.id]);
-            let body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, fillerHashtags: cfg.fillerHashtags });
+            let body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, subtitle: cfg.subtitle });
             // Over LinkedIn's limit (very long titles): leave the last jobs for the next post, down to minJobs.
             while (body.length > MAX_CHARS && jobs.length > cfg.minJobs) {
                 jobs = jobs.slice(0, -1);
-                body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, fillerHashtags: cfg.fillerHashtags });
+                body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, subtitle: cfg.subtitle });
             }
             await store.query('UPDATE posts SET body = $2 WHERE id = $1', [id, body]);
             for (const [i, j] of jobs.entries()) {
