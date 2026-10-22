@@ -219,4 +219,6 @@ A new platform (Naukri, …) is a new `sources/<name>.py` with `NAME`, `LABEL`, 
 
 ## Website
 
-`web/` is the jobs.krawlr.com site, moved here unchanged from the old job-scraper repo: plain HTML and JS, no build step. Every page reads the Supabase `public_*` views in the browser with the publishable key in `web/config.js`; that key can only read those views. `netlify/functions/` holds the Netlify functions for the Telegram bot (`/api/telegram`) and LinkedIn post status (`/api/post-status`); they need `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` and `POST_TOKEN_<PERSON>` in Netlify's environment variables. `netlify.toml` publishes `web/` with no build step.
+`web/` is the job board at https://krawlr.xyz, moved here unchanged from the old job-scraper repo: plain HTML and JS, no build step. Every page reads the Supabase `public_*` views in the browser with the publishable key in `web/config.js`; that key can only read those views. `netlify/functions/` holds the Netlify functions for the Telegram bot (`/api/telegram`) and LinkedIn post status (`/api/post-status`); they need `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` and `POST_TOKEN_<PERSON>` in Netlify's environment variables. `netlify.toml` publishes `web/` with no build step.
+
+`posts/` writes the LinkedIn hiring-alert posts and their pictures every hour (Node, `.github/workflows/posts.yml`); each person's n8n asks for approval on Telegram and posts them. See `posts/README.md`.

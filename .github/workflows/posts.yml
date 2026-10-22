@@ -1,0 +1,53 @@
+name: LinkedIn posts
+
+# Writes the LinkedIn hiring-alert posts with their pictures (posts/linkedin-posts.js): every hour, one post per person
+# in posts/config.js when their last one is older than everyHours (4) and there are enough new jobs. Each person's n8n
+# picks up their newest draft, asks for approval on Telegram and posts it (posts/README.md). The schedule runs only
+# in proj-berry/scrap-py, which has the DATABASE_URL secret.
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Write posts now, even if the last one is newer than everyHours'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 * * * *'        # every hour; GitHub may start scheduled runs a few minutes late
+  push:
+    branches: [main]
+    paths: ['posts/**', 'web/pay-roles.js', '.github/workflows/posts.yml']
+
+concurrency:
+  group: posts                  # never write posts twice at once
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  posts:
+    if: github.event_name != 'schedule' || github.repository == 'proj-berry/scrap-py'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: posts
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: posts/package-lock.json
+      - run: npm ci --omit=dev
+      - run: npm test
+      - name: Write posts
+        if: github.event_name != 'push'     # a push only tests
+        run: node linkedin-posts.js
+        env:
+          FORCE_POSTS: ${{ inputs.force && 'yes' || '' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          N8N_WEBHOOK_ANIMESH: ${{ secrets.N8N_WEBHOOK_ANIMESH }}
+          N8N_WEBHOOK_SACHIN: ${{ secrets.N8N_WEBHOOK_SACHIN }}
+          POST_TOKEN_ANIMESH: ${{ secrets.POST_TOKEN_ANIMESH }}
+          POST_TOKEN_SACHIN: ${{ secrets.POST_TOKEN_SACHIN }}
