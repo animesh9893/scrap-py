@@ -344,18 +344,30 @@ async function main() {
                 console.log(`  ${person.id}: ${jobs.length} new job(s), fewer than ${cfg.minJobs}, no post`);
                 continue;
             }
-            const { rows: [{ id }] } = await store.query('INSERT INTO posts (person) VALUES ($1) RETURNING id', [person.id]);
             let body = buildPost({ jobs, ...options });
             // Over LinkedIn's limit (very long titles): leave the last jobs for the next post, down to minJobs.
             while (body.length > MAX_CHARS && jobs.length > cfg.minJobs) {
                 jobs = jobs.slice(0, -1);
                 body = buildPost({ jobs, ...options });
             }
-            await store.query('UPDATE posts SET body = $2, first_comment = $3 WHERE id = $1',
-                [id, body, buildFirstComment({ jobs, board, siteUrl: cfg.siteUrl })]);
-            for (const [i, j] of jobs.entries()) {
-                await store.query('INSERT INTO post_jobs (post_id, source, job_id, position) VALUES ($1, $2, $3, $4)',
-                    [id, j.source, j.job_id, i + 1]);
+            // One transaction, so a failure (such as a schema the scrape hasn't applied yet) leaves no empty draft behind.
+            const tx = await store.connect();
+            let id;
+            try {
+                await tx.query('BEGIN');
+                ({ rows: [{ id }] } = await tx.query('INSERT INTO posts (person, body, first_comment) VALUES ($1, $2, $3) RETURNING id',
+                    [person.id, body, buildFirstComment({ jobs, board, siteUrl: cfg.siteUrl })]));
+                for (const [i, j] of jobs.entries()) {
+                    await tx.query('INSERT INTO post_jobs (post_id, source, job_id, position) VALUES ($1, $2, $3, $4)',
+                        [id, j.source, j.job_id, i + 1]);
+                }
+                await tx.query('COMMIT');
+            } catch (err) {
+                await tx.query('ROLLBACK').catch(() => {});
+                if (err.code === '42703') err.message += ' (the database schema is older than this code: run a scrape first, it applies the schema)';
+                throw err;
+            } finally {
+                tx.release();
             }
             const problems = checkPost(body);
             if (problems.length) console.warn(`  ! post ${id} doesn't match the template: ${problems.join('; ')}`);
