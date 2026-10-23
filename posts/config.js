@@ -6,7 +6,7 @@ export const linkedin = {
     jobsPerPost: 5,     // roles named in a post
     minJobs: 3,         // no post for a person who would get fewer new jobs than this; they wait for the next run
     scrapeEvery: 'every 2 minutes',                      // "My scraper indexes fresh tech roles ..."; keep it true
-    followAsk: 'Follow me for 4 fresh drops a day.',     // match how often posts really go out
+    followAsk: 'Follow me for multiple fresh drops a day.',     // match how often posts really go out
     // Hashtags picked on purpose: these, then #freshers or #opentowork, three top companies' own tags
     // (companies.hashtag, premium.sql), the main role, the main cities and country (postHashtags in linkedin-posts.js).
     hashtags: ['hiring', 'techjobs', 'softwarejobs', 'layoffs'],

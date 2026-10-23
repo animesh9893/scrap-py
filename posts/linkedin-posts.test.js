@@ -28,8 +28,9 @@ test('post follows the template and passes the check', () => {
     const body = buildPost({ jobs, ...options, boardTags: ['microsoft', 'amazon'] });
     const lines = body.split('\n');
     assert.equal(lines[0], '🚨 𝗦𝗧𝗢𝗣 𝗔𝗣𝗣𝗟𝗬𝗜𝗡𝗚 𝗧𝗢 𝗗𝗘𝗔𝗗 𝗝𝗢𝗕 𝗟𝗜𝗦𝗧𝗜𝗡𝗚𝗦.');
-    assert.match(plain(body), /My scraper indexes fresh tech roles every 2 minutes\. Right now 21,600\+ are live across India, the US and Canada\./);
-    assert.deepEqual(lines.slice(6, 13).map(plain), [
+    assert.match(plain(body), /I built a free scraper that indexes fresh tech roles every 2 minutes\. Right now 21,600\+ are live across India, the US and Canada\./);
+    assert.match(body, /“500\+ applicants”/);
+    assert.deepEqual(lines.slice(2, 9).map(plain), [
         '🔥 Fresh roles at top companies:',
         '🇮🇳 Google — Software Engineer II, Bengaluru',
         '👉 https://jobs.example.com/job.html?id=j1',
@@ -38,7 +39,7 @@ test('post follows the template and passes the check', () => {
         '🇨🇦 Cisco — Software Engineer, Remote',
         '👉 https://jobs.example.com/job.html?id=j3',
     ]);
-    assert.equal(plain(lines.at(-3)), '🔎 All 21,600+ live jobs, with direct apply links: https://jobs.example.com/');
+    assert.equal(plain(lines.at(-3)), '🔎 Free, no sign-up: all 21,600+ live jobs with direct apply links at https://jobs.example.com/');
     assert.equal(plain(lines.at(-4)), '⚡ Follow me for 4 fresh drops a day.');
     assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #google #microsoft #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
     assert.deepEqual(checkPost(body), []);

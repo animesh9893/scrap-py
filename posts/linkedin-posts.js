@@ -170,9 +170,9 @@ function roleLine(job) {
 }
 
 /**
- * The post text: a bold hook against dead listings; what the scraper does and how many jobs `board` ({ live,
- * countries }) has; a line per job (flag, company in bold, role, city) with its page on the site under it (see jobLink);
- * the follow ask; the board's link; hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
+ * The post text: a bold hook against dead listings; a line per job (flag, company in bold, role, city) with its page
+ * on the site under it (see jobLink); why fresh matters, what the scraper does and how many jobs `board` ({ live,
+ * countries }) has; the follow ask; the board's link (free, said plainly so it doesn't read as a sales pitch); hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
  */
 export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk }) {
     const count = liveCount(board.live);
@@ -189,15 +189,16 @@ export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 1
         return [
             `🚨 ${bold('STOP APPLYING TO DEAD JOB LISTINGS.')}`,
             '',
-            'A posting with "500+ applicants" from 2 weeks ago sends your resume into an unread ATS void. The fix: apply early, while the job is fresh.',
-            '',
-            `My scraper indexes fresh tech roles ${scrapeEvery}. Right now ${count} are live across ${countryList(board.countries)}.`,
-            '',
             '🔥 Fresh roles at top companies:',
             ...jobs.flatMap((j) => [roleLine(j), `👉 ${jobLink(j, siteUrl)}`]),
             '',
+            // Curly quotes: n8n's LinkedIn node sends straight ones as &#34;.
+            'A posting with “500+ applicants” from 2 weeks ago sends your resume into an unread ATS void. The fix: apply early, while the job is fresh.',
+            '',
+            `I built a free scraper that indexes fresh tech roles ${scrapeEvery}. Right now ${count} are live across ${countryList(board.countries)}.`,
+            '',
             `⚡ ${bold(followAsk)}`,
-            `🔎 All ${count} live jobs, with direct apply links: ${siteUrl.replace(/\/$/, '')}/`,
+            `🔎 Free, no sign-up: all ${count} live jobs with direct apply links at ${siteUrl.replace(/\/$/, '')}/`,
             '',
             tags.map((t) => `#${t}`).join(' '),
         ].join('\n');
