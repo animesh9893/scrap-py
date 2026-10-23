@@ -1,5 +1,5 @@
 // Every hour (.github/workflows/posts.yml): splits the best new jobs (view post_candidates) between the people in
-// config.js, writes one LinkedIn post with its picture and first comment for each (table posts, shown on the private
+// config.js, writes one LinkedIn post with its picture and job links for each (table posts, shown on the private
 // page /posts.html), then pings each person's n8n when they have a webhook (secret N8N_WEBHOOK_<ID>). Without one, their
 // n8n picks up the newest draft on its own schedule and asks for approval on Telegram.
 // Usage: node posts/linkedin-posts.js   (needs DATABASE_URL)
@@ -171,10 +171,10 @@ function roleLine(job) {
 
 /**
  * The post text: a bold hook against dead listings; what the scraper does and how many jobs `board` ({ live,
- * countries }) has; a line per job (flag, company in bold, role, city; no links, they go in the first comment, see
- * buildFirstComment); the follow ask; hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
+ * countries }) has; a line per job (flag, company in bold, role, city) with its page on the site under it (see jobLink);
+ * the follow ask; the board's link; hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
  */
-export function buildPost({ jobs, board, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk }) {
+export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk }) {
     const count = liveCount(board.live);
     const tags = postHashtags(jobs, hashtags, maxHashtags, boardTags);
     // Over LinkedIn's limit: drop hashtags from the end first (down to 3), before any job has to go.
@@ -194,29 +194,14 @@ export function buildPost({ jobs, board, hashtags = [], maxHashtags = 12, boardT
             `My scraper indexes fresh tech roles ${scrapeEvery}. Right now ${count} are live across ${countryList(board.countries)}.`,
             '',
             '🔥 Fresh roles at top companies:',
-            ...jobs.map(roleLine),
+            ...jobs.flatMap((j) => [roleLine(j), `👉 ${jobLink(j, siteUrl)}`]),
             '',
             `⚡ ${bold(followAsk)}`,
-            `👇 All ${count} jobs with direct apply links are in the first comment.`,
+            `🔎 All ${count} live jobs, with direct apply links: ${siteUrl.replace(/\/$/, '')}/`,
             '',
             tags.map((t) => `#${t}`).join(' '),
         ].join('\n');
     }
-}
-
-/**
- * The post's first comment, where the links go (a link in the post itself makes LinkedIn show it to fewer people):
- * the board's home page, then each role of the post with its pay when known (job.pay, see payFor) and its page on
- * the site (see jobLink).
- */
-export function buildFirstComment({ jobs, board, siteUrl }) {
-    return [
-        `🔎 All ${liveCount(board.live)} live jobs, with apply links and filters: ${siteUrl.replace(/\/$/, '')}/`,
-        '',
-        'The roles in this post:',
-        ...jobs.map((j, i) => [`${i + 1}. ${j.company} — ${shortTitle(j.title)}${j.pay ? ` · ${j.pay}` : ''}`, jobLink(j, siteUrl)]
-            .filter(Boolean).join('\n')),
-    ].join('\n');
 }
 
 /**
@@ -234,8 +219,9 @@ export function checkPost(body) {
     if (length > MAX_CHARS) problems.push(`${length} characters, LinkedIn allows ${MAX_CHARS}`);
     const jobs = lines.filter((l) => /^(\p{Regional_Indicator}{2}|🌍) .+ — .+/u.test(l)).length;
     if (jobs < 1 || jobs > 8) problems.push(`${jobs} role lines ("🇮🇳 Company — Role, City"), expected 1 to 8`);
-    if (/https?:\/\//.test(text)) problems.push('has a link: links go in the first comment');
-    if (!/first comment\./.test(lines.at(-3) ?? '')) problems.push('the line before the hashtags should point to the first comment');
+    const links = lines.filter((l) => /^👉 https?:\/\/\S+$/.test(l)).length;
+    if (links !== jobs) problems.push(`${links} job links ("👉 https://…") for ${jobs} roles, expected one under each role`);
+    if (!/^🔎 .+ https?:\/\/\S+$/.test(lines.at(-3) ?? '')) problems.push('the line before the hashtags should link to the board ("🔎 … https://…")');
     const tags = (lines.at(-1) ?? '').match(/#\w+/g) ?? [];
     if (tags.length < 1 || tags.length > 30) problems.push(`${tags.length} hashtags on the last line, expected 1 to 30`);
     if (/\b(undefined|null|NaN)\b/.test(text)) problems.push('contains "undefined", "null" or "NaN"');
@@ -329,7 +315,7 @@ async function main() {
             `SELECT c.hashtag FROM companies c JOIN company_index ci ON ci.slug = c.slug
              WHERE c.premium_tier = 1 AND c.hashtag IS NOT NULL ORDER BY ci.jobs_week DESC, c.name LIMIT 8`);
         const board = { live, countries: countries.map((r) => r.country) };
-        const options = { board, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, boardTags: top.map((r) => r.hashtag),
+        const options = { board, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, boardTags: top.map((r) => r.hashtag),
             scrapeEvery: cfg.scrapeEvery, followAsk: cfg.followAsk };
         const split = splitJobs(candidates, cfg.people, cfg.jobsPerPost);
         for (const person of cfg.people) {
@@ -355,8 +341,8 @@ async function main() {
             let id;
             try {
                 await tx.query('BEGIN');
-                ({ rows: [{ id }] } = await tx.query('INSERT INTO posts (person, body, first_comment) VALUES ($1, $2, $3) RETURNING id',
-                    [person.id, body, buildFirstComment({ jobs, board, siteUrl: cfg.siteUrl })]));
+                ({ rows: [{ id }] } = await tx.query('INSERT INTO posts (person, body) VALUES ($1, $2) RETURNING id',
+                    [person.id, body]));
                 for (const [i, j] of jobs.entries()) {
                     await tx.query('INSERT INTO post_jobs (post_id, source, job_id, position) VALUES ($1, $2, $3, $4)',
                         [id, j.source, j.job_id, i + 1]);

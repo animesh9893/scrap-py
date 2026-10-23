@@ -10,16 +10,14 @@ Supabase project. Node, separate from the Python scraper: `npm ci` and `npm test
    post only, ever. The post: a hook against dead listings, what the scraper does (`scrapeEvery`, keep it true)
    and how many jobs are live, a line per role (flag, company, role, city), the follow ask (`followAsk`) and up to
    12 hashtags: `config.js`' own, #freshers or #opentowork, three company brand tags (the post's, then the board's
-   top ones), the role, the two main cities and the country. There are no links in the post itself: they are in
-   the **first comment** (`posts.first_comment`, shown on /posts.html and sent to Telegram by n8n), which you add
-   by hand after the post is up.
+   top ones), the role, the two main cities and the country. Each role has its page on the site (`job.html?id=`)
+   under it, and the line before the hashtags links to the board.
 2. **Picture** (`post-image.js`): a 1080×1350 PNG with the opening count, a card per company (up to 6) with its
    LinkedIn logo, roles and places, a strip of premium companies (`companies.is_premium`) and the site at the
    bottom. Stored in `posts.image`, served by the view `public_post_images`. Fonts: Inter (OFL) in `fonts/`.
 3. **n8n** (each person's own, `n8n/hiring-alert-workflow.json`): fetches the person's newest draft from
    `public_linkedin_posts`, checks it against the template, sends the picture and text to Telegram with
-   Approve/Decline (with the first comment under the text), posts to LinkedIn on Approve, sends the first comment
-   to Telegram to paste under the post, then reports `posted` or `skipped` to
+   Approve/Decline, posts to LinkedIn on Approve, then reports `posted` or `skipped` to
    `https://krawlr.xyz/api/post-status` (Netlify function) with the person's token. A person with an
    `N8N_WEBHOOK_<ID>` secret gets pinged right after their post is written; without one, n8n's own schedule picks
    the draft up.
