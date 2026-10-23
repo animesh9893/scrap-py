@@ -170,11 +170,24 @@ function roleLine(job) {
 }
 
 /**
+ * How long ago the oldest job in the post was first seen, rounded up and said short: "40 minutes", "9 hours",
+ * "2 days". Jobs without first_seen_at count as just seen.
+ */
+export function freshness(jobs, now = new Date()) {
+    const oldest = Math.min(...jobs.map((j) => (j.first_seen_at ? new Date(j.first_seen_at) : now).getTime()));
+    const minutes = Math.max(1, Math.ceil((now.getTime() - oldest) / 60000));
+    if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+    const hours = Math.ceil(minutes / 60);
+    if (hours < 48) return `${hours} hour${hours === 1 ? '' : 's'}`;
+    return `${Math.ceil(hours / 24)} days`;
+}
+
+/**
  * The post text: a bold hook against dead listings; a line per job (flag, company in bold, role, city) with its page
  * on the site under it (see jobLink); why fresh matters, what the scraper does and how many jobs `board` ({ live,
  * countries }) has; the follow ask; the board's link (free, said plainly so it doesn't read as a sales pitch); hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
  */
-export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk }) {
+export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk, now = new Date() }) {
     const count = liveCount(board.live);
     const tags = postHashtags(jobs, hashtags, maxHashtags, boardTags);
     // Over LinkedIn's limit: drop hashtags from the end first (down to 3), before any job has to go.
@@ -189,7 +202,7 @@ export function buildPost({ jobs, board, siteUrl, hashtags = [], maxHashtags = 1
         return [
             `🚨 ${bold('STOP APPLYING TO DEAD JOB LISTINGS.')}`,
             '',
-            '🔥 Fresh roles at top companies:',
+            `⏱️ Just found at top companies, all in the last ${freshness(jobs, now)}:`,
             ...jobs.flatMap((j) => [roleLine(j), `👉 ${jobLink(j, siteUrl)}`]),
             '',
             // Curly quotes: n8n's LinkedIn node sends straight ones as &#34;.
@@ -289,15 +302,16 @@ async function main() {
     const made = [];
     try {
         // scrap-py sets jobs.category rather than role; it gives the role hashtags (ai → #machinelearning).
-        // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql). The
-        // first job of each company comes first, so a post names as many different companies as it can.
+        // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql). Jobs
+        // found in the last 6 hours come first (the heading says how fresh they are), then the first job of each
+        // company, so a post names as many different companies as it can.
         const { rows: candidates } = await store.query(
             `SELECT pc.*, COALESCE(pc.role, CASE j.category WHEN 'ai' THEN 'ml' ELSE j.category END) AS role,
                     j.seniority, c.hashtag AS company_tag,
                     (SELECT l.country FROM job_search_hits h JOIN locations l ON l.id = h.location_id
                      WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.priority, l.id LIMIT 1) AS country
              FROM post_candidates pc JOIN jobs j USING (source, job_id) LEFT JOIN companies c ON c.slug = pc.company_slug
-             ORDER BY pc.nth_at_company, pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
+             ORDER BY pc.first_seen_at > now() - interval '6 hours' DESC, pc.nth_at_company, pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
         const { rows: salaries } = await store.query(
             `SELECT company_slug, query, currency, median_annual::float AS median FROM company_salaries
              WHERE company_slug = ANY($1) ORDER BY median_annual DESC`, [[...new Set(candidates.map((j) => j.company_slug))]]);

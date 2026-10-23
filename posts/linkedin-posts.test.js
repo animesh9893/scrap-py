@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitJobs, buildPost, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, shortTitle, liveCount, countryList } from './linkedin-posts.js';
+import { splitJobs, buildPost, checkPost, freshness, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, shortTitle, liveCount, countryList } from './linkedin-posts.js';
 import { postImageSvg, renderPostImage, pickCompanies, loadLogos, MAX_FEATURED } from './post-image.js';
 
 const people = [{ id: 'animesh' }, { id: 'sachin' }];
@@ -31,7 +31,7 @@ test('post follows the template and passes the check', () => {
     assert.match(plain(body), /I built a free scraper that indexes fresh tech roles every 2 minutes\. Right now 21,600\+ are live across India, the US and Canada\./);
     assert.match(body, /“500\+ applicants”/);
     assert.deepEqual(lines.slice(2, 9).map(plain), [
-        '🔥 Fresh roles at top companies:',
+        '⏱️ Just found at top companies, all in the last 1 minute:',
         '🇮🇳 Google — Software Engineer II, Bengaluru',
         '👉 https://jobs.example.com/job.html?id=j1',
         '🇺🇸 Amazon — SDE I, Seattle',
@@ -43,6 +43,15 @@ test('post follows the template and passes the check', () => {
     assert.equal(plain(lines.at(-4)), '⚡ Follow me for 4 fresh drops a day.');
     assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #google #microsoft #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
     assert.deepEqual(checkPost(body), []);
+});
+
+test('freshness: the oldest job in the post, rounded up', () => {
+    const now = new Date('2026-10-23T22:00:00Z');
+    const at = (iso) => ({ first_seen_at: iso });
+    assert.equal(freshness([at('2026-10-23T21:50:30Z'), at('2026-10-23T21:59:00Z')], now), '10 minutes');
+    assert.equal(freshness([at('2026-10-23T13:30:00Z')], now), '9 hours');
+    assert.equal(freshness([at('2026-10-21T10:00:00Z')], now), '3 days');
+    assert.equal(freshness([{}], now), '1 minute');
 });
 
 test('counts, countries and long titles are said short', () => {
