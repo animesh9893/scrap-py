@@ -1,5 +1,5 @@
 // LinkedIn posts (linkedin-posts.js): the hook against dead listings, the live job count, a few fresh roles at top
-// companies and the follow ask. Every job links to its /job.html page on siteUrl, in the post's first comment.
+// companies and the follow ask. Every job links to its /job.html page on siteUrl, under its line in the post.
 export const linkedin = {
     siteUrl: 'https://krawlr.xyz',
     everyHours: 4,      // at most one post per person this often; runs in between keep their jobs for the next post

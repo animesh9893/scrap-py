@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitJobs, buildPost, buildFirstComment, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, shortTitle, liveCount, countryList } from './linkedin-posts.js';
+import { splitJobs, buildPost, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, shortTitle, liveCount, countryList } from './linkedin-posts.js';
 import { postImageSvg, renderPostImage, pickCompanies, loadLogos, MAX_FEATURED } from './post-image.js';
 
 const people = [{ id: 'animesh' }, { id: 'sachin' }];
 const job = (n, extra = {}) => ({ job_id: `j${n}`, title: `Engineer ${n}`, company: `Co ${n % 3}`, location: 'Bengaluru, Karnataka, India', country: 'IN', tags: [], ...extra });
 const board = { live: 21609, countries: ['IN', 'US', 'CA'] };
-const options = { board, hashtags: ['hiring', 'techjobs'], scrapeEvery: 'every 2 minutes', followAsk: 'Follow me for 4 fresh drops a day.' };
+const options = { board, siteUrl: 'https://jobs.example.com/', hashtags: ['hiring', 'techjobs'], scrapeEvery: 'every 2 minutes', followAsk: 'Follow me for 4 fresh drops a day.' };
 
 test('jobs are dealt out in turn, different for each person', () => {
     const split = splitJobs([1, 2, 3, 4, 5].map((n) => job(n)), people, 2);
@@ -29,30 +29,19 @@ test('post follows the template and passes the check', () => {
     const lines = body.split('\n');
     assert.equal(lines[0], '🚨 𝗦𝗧𝗢𝗣 𝗔𝗣𝗣𝗟𝗬𝗜𝗡𝗚 𝗧𝗢 𝗗𝗘𝗔𝗗 𝗝𝗢𝗕 𝗟𝗜𝗦𝗧𝗜𝗡𝗚𝗦.');
     assert.match(plain(body), /My scraper indexes fresh tech roles every 2 minutes\. Right now 21,600\+ are live across India, the US and Canada\./);
-    assert.deepEqual(lines.slice(6, 10).map(plain), [
+    assert.deepEqual(lines.slice(6, 13).map(plain), [
         '🔥 Fresh roles at top companies:',
         '🇮🇳 Google — Software Engineer II, Bengaluru',
+        '👉 https://jobs.example.com/job.html?id=j1',
         '🇺🇸 Amazon — SDE I, Seattle',
+        '👉 https://jobs.example.com/job.html?id=j2',
         '🇨🇦 Cisco — Software Engineer, Remote',
+        '👉 https://jobs.example.com/job.html?id=j3',
     ]);
-    assert.equal(plain(lines.at(-3)), '👇 All 21,600+ jobs with direct apply links are in the first comment.');
+    assert.equal(plain(lines.at(-3)), '🔎 All 21,600+ live jobs, with direct apply links: https://jobs.example.com/');
     assert.equal(plain(lines.at(-4)), '⚡ Follow me for 4 fresh drops a day.');
     assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #google #microsoft #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
-    assert.doesNotMatch(body, /https?:/);
     assert.deepEqual(checkPost(body), []);
-});
-
-test('first comment: the board link, then each role with its pay and page', () => {
-    const jobs = [job(1, { company: 'Google', title: 'Software Engineer II', pay: '~₹24L/yr on Glassdoor' }), job(2, { company: 'Amazon', title: 'SDE I' })];
-    assert.equal(buildFirstComment({ jobs, board, siteUrl: 'https://jobs.example.com/' }), [
-        '🔎 All 21,600+ live jobs, with apply links and filters: https://jobs.example.com/',
-        '',
-        'The roles in this post:',
-        '1. Google — Software Engineer II · ~₹24L/yr on Glassdoor',
-        'https://jobs.example.com/job.html?id=j1',
-        '2. Amazon — SDE I',
-        'https://jobs.example.com/job.html?id=j2',
-    ].join('\n'));
 });
 
 test('counts, countries and long titles are said short', () => {
@@ -108,9 +97,9 @@ test('check catches posts that drift from the template', () => {
     const ok = buildPost({ jobs: [job(1)], ...options });
     assert.deepEqual(checkPost(ok), []);
     assert.match(checkPost(ok.replace('Engineer 1', 'undefined')).join(), /undefined/);
-    assert.match(checkPost(`${ok}\nhttps://evil.example`).join(), /links go in the first comment/);
+    assert.match(checkPost(ok.replace(/\n👉 .*/, '')).join(), /0 job links .* for 1 roles/);
     assert.match(checkPost(ok.replace('🇮🇳 ', '')).join(), /0 role lines/);
-    assert.match(checkPost(ok.replace('first comment.', 'link in bio.')).join(), /point to the first comment/);
+    assert.match(checkPost(ok.replace(/(🔎 .*) https:\S+/, '$1 link in bio')).join(), /link to the board/);
     assert.match(checkPost(ok + 'x'.repeat(3000)).join(), /characters/);
 });
 
