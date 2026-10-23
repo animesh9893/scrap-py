@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitJobs, buildPost, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, companyNames } from './linkedin-posts.js';
+import { splitJobs, buildPost, buildFirstComment, checkPost, plain, bold, italic, payFor, payRoles, jobLink, postHashtags, shortTitle, liveCount, countryList } from './linkedin-posts.js';
 import { postImageSvg, renderPostImage, pickCompanies, loadLogos, MAX_FEATURED } from './post-image.js';
 
 const people = [{ id: 'animesh' }, { id: 'sachin' }];
-const job = (n, extra = {}) => ({ job_id: `j${n}`, title: `Engineer ${n}`, company: `Co ${n % 3}`, location: 'Bengaluru, Karnataka, India', tags: [], ...extra });
+const job = (n, extra = {}) => ({ job_id: `j${n}`, title: `Engineer ${n}`, company: `Co ${n % 3}`, location: 'Bengaluru, Karnataka, India', country: 'IN', tags: [], ...extra });
+const board = { live: 21609, countries: ['IN', 'US', 'CA'] };
+const options = { board, hashtags: ['hiring', 'techjobs'], scrapeEvery: 'every 2 minutes', followAsk: 'Follow me for 4 fresh drops a day.' };
 
 test('jobs are dealt out in turn, different for each person', () => {
     const split = splitJobs([1, 2, 3, 4, 5].map((n) => job(n)), people, 2);
@@ -18,33 +20,49 @@ test('a short list goes to whoever still has room', () => {
 });
 
 test('post follows the template and passes the check', () => {
-    const body = buildPost({
-        id: 42, siteUrl: 'https://jobs.example.com/', hashtags: ['hiring'], subtitle: '💼 Entry and mid level software roles',
-        jobs: [
-            job(1, { tags: ['React', 'TypeScript'], pay: '~₹24L/yr on Glassdoor', url: 'https://in.linkedin.com/jobs/view/engineer-1-at-co-4123456789' }),
-            job(2, { tags: ['React'], workplace: 'remote', url: 'https://www.linkedin.com/jobs/view/4123456790/' }),
-            job(3, { tags: ['C++'] }),
-        ],
-    });
+    const jobs = [
+        job(1, { company: 'Google', title: 'Software Engineer II', company_tag: 'google', role: 'backend', seniority: 'Entry level' }),
+        job(2, { company: 'Amazon', title: 'SDE I', company_tag: 'amazon', country: 'US', location: 'Seattle, Washington, United States' }),
+        job(3, { company: 'Cisco', title: 'Software Engineer', workplace: 'remote', location: 'Remote', country: 'CA' }),
+    ];
+    const body = buildPost({ jobs, ...options, boardTags: ['microsoft', 'amazon'] });
     const lines = body.split('\n');
-    assert.equal(plain(lines[0]), '🚀 Hiring alert: 3 new openings at Co 0, Co 1 & Co 2');
-    assert.equal(lines[1], '💼 Entry and mid level software roles');
-    assert.deepEqual(lines.slice(3, 12), [
-        '1. 𝗖𝗼 𝟭: Engineer 1 · 𝘉𝘦𝘯𝘨𝘢𝘭𝘶𝘳𝘶',
-        '💰 ~₹24L/yr on Glassdoor',
-        '🔗 https://jobs.example.com/job.html?id=j1',
-        '',
-        '2. 𝗖𝗼 𝟮: Engineer 2 · 𝘉𝘦𝘯𝘨𝘢𝘭𝘶𝘳𝘶 (𝘙𝘦𝘮𝘰𝘵𝘦)',
-        '🔗 https://jobs.example.com/job.html?id=j2',
-        '',
-        '3. 𝗖𝗼 𝟬: Engineer 3 · 𝘉𝘦𝘯𝘨𝘢𝘭𝘶𝘳𝘶',
-        '🔗 https://jobs.example.com/job.html?id=j3',
+    assert.equal(lines[0], '🚨 𝗦𝗧𝗢𝗣 𝗔𝗣𝗣𝗟𝗬𝗜𝗡𝗚 𝗧𝗢 𝗗𝗘𝗔𝗗 𝗝𝗢𝗕 𝗟𝗜𝗦𝗧𝗜𝗡𝗚𝗦.');
+    assert.match(plain(body), /My scraper indexes fresh tech roles every 2 minutes\. Right now 21,600\+ are live across India, the US and Canada\./);
+    assert.deepEqual(lines.slice(6, 10).map(plain), [
+        '🔥 Fresh roles at top companies:',
+        '🇮🇳 Google — Software Engineer II, Bengaluru',
+        '🇺🇸 Amazon — SDE I, Seattle',
+        '🇨🇦 Cisco — Software Engineer, Remote',
     ]);
-    assert.doesNotMatch(body, /linkedin\.com/);
-    assert.match(plain(body), /🔥 In demand: React, C\+\+, TypeScript/);
-    assert.match(body, /https:\/\/jobs\.example\.com\/$/m);
-    assert.equal(lines.at(-1), '#hiring #opentowork #bangalorejobs');
+    assert.equal(plain(lines.at(-3)), '👇 All 21,600+ jobs with direct apply links are in the first comment.');
+    assert.equal(plain(lines.at(-4)), '⚡ Follow me for 4 fresh drops a day.');
+    assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #google #microsoft #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
+    assert.doesNotMatch(body, /https?:/);
     assert.deepEqual(checkPost(body), []);
+});
+
+test('first comment: the board link, then each role with its pay and page', () => {
+    const jobs = [job(1, { company: 'Google', title: 'Software Engineer II', pay: '~₹24L/yr on Glassdoor' }), job(2, { company: 'Amazon', title: 'SDE I' })];
+    assert.equal(buildFirstComment({ jobs, board, siteUrl: 'https://jobs.example.com/' }), [
+        '🔎 All 21,600+ live jobs, with apply links and filters: https://jobs.example.com/',
+        '',
+        'The roles in this post:',
+        '1. Google — Software Engineer II · ~₹24L/yr on Glassdoor',
+        'https://jobs.example.com/job.html?id=j1',
+        '2. Amazon — SDE I',
+        'https://jobs.example.com/job.html?id=j2',
+    ].join('\n'));
+});
+
+test('counts, countries and long titles are said short', () => {
+    assert.deepEqual([21609, 21600, 1000, 999, 5].map(liveCount), ['21,600+', '21,600+', '1,000+', '999', '5']);
+    assert.equal(countryList(['IN', 'US', 'CA']), 'India, the US and Canada');
+    assert.equal(countryList(['IN', 'XX']), 'India');
+    assert.equal(countryList([]), 'several countries');
+    assert.equal(shortTitle('Software Engineer II'), 'Software Engineer II');
+    assert.equal(shortTitle('Software Development Engineer II, Amazon FinAuto - Travel & Events Platform Team (Payments)'),
+        'Software Development Engineer II, Amazon FinAuto - Travel & Events…');
 });
 
 test('pay: the listing\'s own salary, else the Glassdoor median for the closest role', () => {
@@ -87,11 +105,12 @@ test('bold and italic letters turn back into plain ones', () => {
 
 test('check catches posts that drift from the template', () => {
     assert.ok(checkPost('Hello world').length >= 3);
-    const ok = buildPost({ id: 1, siteUrl: 'https://x.dev', hashtags: ['hiring'], jobs: [job(1)] });
+    const ok = buildPost({ jobs: [job(1)], ...options });
     assert.deepEqual(checkPost(ok), []);
     assert.match(checkPost(ok.replace('Engineer 1', 'undefined')).join(), /undefined/);
-    assert.match(checkPost(`${ok}\nhttps://evil.example`).join(), /after all the others/);
-    assert.match(checkPost(ok.replace('Engineer 1', 'Engineer 1 https://a.example https://b.example')).join(), /3 job links for 1 jobs/);
+    assert.match(checkPost(`${ok}\nhttps://evil.example`).join(), /links go in the first comment/);
+    assert.match(checkPost(ok.replace('🇮🇳 ', '')).join(), /0 role lines/);
+    assert.match(checkPost(ok.replace('first comment.', 'link in bio.')).join(), /point to the first comment/);
     assert.match(checkPost(ok + 'x'.repeat(3000)).join(), /characters/);
 });
 
@@ -104,26 +123,20 @@ test('the n8n workflow runs the same template check', async () => {
     assert.equal(code.split('function plain(').length, 2, 'plain() is in the workflow once');
 });
 
-test('hashtags: core ones, audience, the two biggest companies, the main role and city, at most the limit', () => {
+test('hashtags: core, audience, three companies (the post\'s first, then the board\'s), role, cities, country', () => {
     const jobs = [
-        job(1, { role: 'backend', company: 'Amazon', company_tag: 'amazon', seniority: 'Mid-Senior level' }),
-        job(2, { role: 'backend', company: 'Amazon', company_tag: 'amazon', location: 'Greater Kolkata Area' }),
-        job(3, { role: 'ml', company: 'Google', company_tag: 'google', seniority: 'Entry level', location: 'Greater Kolkata Area' }),
-        job(4, { role: 'backend', company: 'Meta', company_tag: 'meta', location: 'Greater Kolkata Area' }),
+        job(1, { role: 'backend', company_tag: 'amazon', seniority: 'Mid-Senior level' }),
+        job(2, { role: 'backend', company_tag: 'amazon', location: 'Greater Kolkata Area' }),
+        job(3, { role: 'ml', company_tag: 'google', seniority: 'Entry level', location: 'Greater Kolkata Area' }),
+        job(4, { role: 'backend', company_tag: null, location: 'Pune, Maharashtra, India' }),
     ];
-    assert.deepEqual(postHashtags(jobs, ['hiring', 'SoftwareJobs', 'techjobs'], 8),
-        ['hiring', 'softwarejobs', 'techjobs', 'freshers', 'amazon', 'google', 'backenddeveloper', 'kolkatajobs']);
-    assert.equal(postHashtags(jobs, ['hiring', 'softwarejobs', 'techjobs'], 4).length, 4);
-    // No entry level job: #opentowork. Mostly remote: #remotejobs. No brand tag or a long one: left out, not padded.
-    const remote = [job(1, { workplace: 'remote', company_tag: 'averyveryverylongcompanytag' }), job(2, { workplace: 'remote' })];
-    assert.deepEqual(postHashtags(remote, ['hiring'], 8), ['hiring', 'opentowork', 'remotejobs']);
-});
-
-test('heading names the most listed companies first, then how many more', () => {
-    const at = (...names) => names.map((company, i) => job(i, { company }));
-    assert.equal(companyNames(at('Meta', 'Amazon', 'Amazon', 'Google', 'Citi', 'IBM')), 'Amazon, Citi, Google & 2 more');
-    assert.equal(companyNames(at('Meta', 'Amazon', 'Google')), 'Amazon, Google & Meta');
-    assert.equal(companyNames(at('Meta', 'Meta')), 'Meta');
+    const core = ['hiring', 'TechJobs', 'layoffs'];
+    assert.deepEqual(postHashtags(jobs, core, 12, ['microsoft', 'amazon', 'meta']),
+        ['hiring', 'techjobs', 'layoffs', 'freshers', 'amazon', 'google', 'microsoft', 'backenddeveloper', 'kolkatajobs', 'bangalorejobs', 'indiajobs']);
+    assert.equal(postHashtags(jobs, core, 4).length, 4);
+    // No entry level job: #opentowork. Mostly remote: #remotejobs. A long or missing brand tag is left out, not padded.
+    const remote = [job(1, { workplace: 'remote', company_tag: 'averyveryverylongcompanytag', country: 'US' }), job(2, { workplace: 'remote' })];
+    assert.deepEqual(postHashtags(remote, ['hiring'], 12), ['hiring', 'opentowork', 'remotejobs', 'indiajobs']);
 });
 
 test('picture: the post\'s companies get cards, premium then most jobs first; the strip skips them', () => {
@@ -170,10 +183,10 @@ test('picture: logos fall back to the site icon, then to initials, and text is e
 });
 
 test('a long post drops hashtags before going over LinkedIn\'s limit', () => {
-    const jobs = Array.from({ length: 10 }, (_, i) => job(i, { title: 'Senior Software Engineer II, Backend Platform (Golang)',
-        company: `Cencora Global Capability Center ${i}`, tags: ['Go', 'Kubernetes'], pay: '~₹45L/yr on Glassdoor' }));
+    const jobs = Array.from({ length: 8 }, (_, i) => job(i, { title: 'Senior Software Engineer II, Backend Platform (Golang) '.repeat(3),
+        company: `Cencora Global Capability Center ${i}`, tags: ['Go', 'Kubernetes'] }));
     const core = Array.from({ length: 30 }, (_, i) => `longhashtag${i}`);
-    const body = buildPost({ id: 1, siteUrl: 'https://job-scraper-web-beryl.vercel.app', hashtags: core, maxHashtags: 30, jobs });
+    const body = buildPost({ jobs, ...options, hashtags: core, maxHashtags: 30 });
     assert.ok(body.length <= 3000, `${body.length} characters`);
     assert.deepEqual(checkPost(body), []);
 });

@@ -287,6 +287,7 @@ CREATE TABLE IF NOT EXISTS posts (
 );
 CREATE INDEX IF NOT EXISTS posts_person ON posts (person, created_at DESC);
 ALTER TABLE posts ADD COLUMN IF NOT EXISTS image BYTEA;   -- the post's picture, a PNG (src/post-image.js)
+ALTER TABLE posts ADD COLUMN IF NOT EXISTS first_comment TEXT;   -- the comment with the links, added under the post by hand
 CREATE TABLE IF NOT EXISTS post_jobs (
     post_id  BIGINT NOT NULL REFERENCES posts (id) ON DELETE CASCADE,
     source   TEXT NOT NULL,
@@ -304,7 +305,7 @@ ALTER TABLE post_jobs ENABLE ROW LEVEL SECURITY;
 CREATE OR REPLACE FUNCTION post_job_ok(title TEXT, seniority TEXT) RETURNS BOOLEAN LANGUAGE sql IMMUTABLE AS $$
     SELECT COALESCE(seniority, '') !~* '^(director|executive|internship)$'
        AND title ~* '(engineer|developer|\msde|programmer|software|scientist|data analyst|devops|\msre\M|full ?stack|front ?end|back ?end|android|\mios\M|mobile|machine learning|\mml\M|\mai\M|\mllm|cloud|security|\mqa\M|\mtest|automation)'
-       AND title !~* '\m(senior|sr|lead|principal|staff|manager|director|head|architect|vp|avp|vice president|chief|distinguished|fellow|advisory|intern|internship)\M'
+       AND title !~* '\m(senior|sr|lead|leader|principal|staff|manager|director|head|architect|vp|avp|vice president|chief|distinguished|fellow|advisory|intern|internship)\M'
        AND title !~* '(engineer|developer|scientist|analyst)\s*[-,]?\s*(iv|v|vi|[4-9])\M'
        AND title !~* '(support|customer|help ?desk|service desk|technical account|\msales\M|pre-?sales|recruit|\mbpo\M|voice process|call cent|desktop|operator|administrator|consultant|functional|business analyst|trainer|instructor|tutor|annotat|data entry|content|writer|contractor)'
 $$;
@@ -353,7 +354,8 @@ CREATE OR REPLACE VIEW post_candidates AS
 -- public key may read them; the page's password only keeps the page out of casual view.
 CREATE OR REPLACE VIEW public_linkedin_posts AS
     SELECT p.id, p.person, p.status, p.body, p.linkedin_url AS "linkedinUrl", p.created_at AS "createdAt",
-           p.posted_at AS "postedAt", (SELECT COUNT(*)::int FROM post_jobs pj WHERE pj.post_id = p.id) AS jobs
+           p.posted_at AS "postedAt", (SELECT COUNT(*)::int FROM post_jobs pj WHERE pj.post_id = p.id) AS jobs,
+           p.first_comment AS "firstComment"
     FROM posts p;
 
 -- Each post's picture as base64 PNG, for n8n (node "Picture to file" turns it back into an image).

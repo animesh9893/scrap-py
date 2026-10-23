@@ -208,7 +208,7 @@ DO $$ BEGIN
         GRANT SELECT (slug, label, sort_order) ON categories TO anon, authenticated;
         GRANT SELECT (id, name, country, priority, is_active) ON locations TO anon, authenticated;
         GRANT SELECT (source, job_id, location_id) ON job_search_hits TO anon, authenticated;
-        GRANT SELECT (id, person, status, body, linkedin_url, created_at, posted_at, image) ON posts TO anon, authenticated;
+        GRANT SELECT (id, person, status, body, linkedin_url, created_at, posted_at, image, first_comment) ON posts TO anon, authenticated;
         GRANT SELECT (post_id, source, job_id, position) ON post_jobs TO anon, authenticated;
 
         DROP POLICY IF EXISTS site_read ON jobs;
