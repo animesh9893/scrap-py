@@ -1,6 +1,6 @@
 // Every hour (.github/workflows/posts.yml): splits the best new jobs (view post_candidates) between the people in
-// config.js, writes one LinkedIn hiring-alert post with its picture for each (table posts, shown on the private page
-// /posts.html), then pings each person's n8n when they have a webhook (secret N8N_WEBHOOK_<ID>). Without one, their
+// config.js, writes one LinkedIn post with its picture and first comment for each (table posts, shown on the private
+// page /posts.html), then pings each person's n8n when they have a webhook (secret N8N_WEBHOOK_<ID>). Without one, their
 // n8n picks up the newest draft on its own schedule and asks for approval on Telegram.
 // Usage: node posts/linkedin-posts.js   (needs DATABASE_URL)
 import { pathToFileURL } from 'node:url';
@@ -71,39 +71,62 @@ function cityTag(city) {
     return name ? `${CITY_TAGS[name] ?? name}jobs` : null;
 }
 
-// The values most jobs share, most common first.
-function mostCommon(values, n) {
+// The countries the board searches (locations.country), as the flag in front of a role, how the post names them and
+// the hashtag people follow.
+const COUNTRIES = {
+    IN: { flag: '🇮🇳', name: 'India', tag: 'indiajobs' },
+    US: { flag: '🇺🇸', name: 'the US', tag: 'usjobs' },
+    CA: { flag: '🇨🇦', name: 'Canada', tag: 'canadajobs' },
+};
+
+// The values most jobs share, most common first; ties go by `rank` (lower first), then by name.
+function mostCommon(values, n, rank = () => 0) {
     const counts = new Map();
     for (const v of values.filter(Boolean)) counts.set(v, (counts.get(v) ?? 0) + 1);
-    return [...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, n).map(([v]) => v);
+    return [...counts].sort((a, b) => b[1] - a[1] || rank(a[0]) - rank(b[0]) || a[0].localeCompare(b[0])).slice(0, n).map(([v]) => v);
 }
 
 const MAX_TAG = 20;   // longer ones are nobody's hashtag (#greaterkolkataareajobs)
+const COMPANY_TAGS = 3;
 
 /**
- * A post's hashtags, at most `max`, each picked on purpose rather than a wall of them: the configured core ones,
- * #freshers when a job is entry level (else #opentowork), the brand tags (companies.hashtag, job.company_tag) of the
- * post's two most listed companies, its most common role and its most common city (or #remotejobs). A slot with
- * nothing to say is left out, never padded.
+ * A post's hashtags, at most `max`, each picked on purpose: the configured core ones (#hiring, #layoffs...),
+ * #freshers when a job is entry level (else #opentowork), three brand tags (companies.hashtag, job.company_tag): the
+ * post's most listed companies first, then the board's top ones (`boardTags`), the most common role, the two most
+ * common cities (or #remotejobs) and the main country. A slot with nothing to say is left out, never padded.
  */
-export function postHashtags(jobs, core = [], max = 8) {
+export function postHashtags(jobs, core = [], max = 12, boardTags = []) {
     const entry = jobs.some((j) => /^(entry level|internship)$/i.test(j.seniority ?? ''));
     const cities = jobs.filter((j) => j.workplace !== 'remote').map((j) => where(j));
     const remote = jobs.filter((j) => j.workplace === 'remote').length > cities.length;
+    // Equally listed companies: the ones with the most jobs on the board first.
+    const own = mostCommon(jobs.map((j) => j.company_tag), COMPANY_TAGS, (t) => (boardTags.includes(t) ? boardTags.indexOf(t) : boardTags.length));
     return [...new Set([
         ...core,
         entry ? 'freshers' : 'opentowork',
-        ...mostCommon(jobs.map((j) => j.company_tag), 2),
+        ...[...own, ...boardTags.filter((t) => !own.includes(t))].slice(0, COMPANY_TAGS),
         ...mostCommon(jobs.map((j) => ROLE_TAGS[j.role]), 1),
-        remote ? 'remotejobs' : mostCommon(cities.map(cityTag), 1)[0],
+        ...(remote ? ['remotejobs'] : []),
+        ...mostCommon(cities.map(cityTag), 2),
+        ...mostCommon(jobs.map((j) => COUNTRIES[j.country]?.tag), 1),
     ].map((t) => hashtag(t ?? '')).filter((t) => t && t.length <= MAX_TAG))].slice(0, max);
 }
 
-/** "Amazon, Meta, Google & 5 more" (the most listed first), or "Amazon, Meta & Google" when there are three. */
-export function companyNames(jobs, shown = 3) {
-    const names = mostCommon(jobs.map((j) => j.company), Infinity);
-    if (names.length <= shown) return names.length > 1 ? `${names.slice(0, -1).join(', ')} & ${names.at(-1)}` : names[0] ?? '';
-    return `${names.slice(0, shown).join(', ')} & ${names.length - shown} more`;
+/** A job title cut at a word to at most `max` characters: "Software Development Engineer II, Amazon FinAuto…". */
+export function shortTitle(title, max = 70) {
+    const t = String(title ?? '').trim().replace(/\s+/g, ' ');
+    return t.length <= max ? t : `${t.slice(0, max).replace(/[\s,;:(–|/-]+[^\s,;:(–|/-]*$/, '')}…`;
+}
+
+/** Jobs on the board as the post says them: 21609 → "21,600+", 850 → "850". */
+export function liveCount(n) {
+    return n >= 1000 ? `${(Math.floor(n / 100) * 100).toLocaleString('en-US')}+` : String(n);
+}
+
+/** ['IN', 'US', 'CA'] → "India, the US and Canada" (countries the post has no name for are left out). */
+export function countryList(codes) {
+    const names = codes.map((c) => COUNTRIES[c]?.name).filter(Boolean);
+    return names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names.at(-1)}` : names[0] ?? 'several countries';
 }
 
 // 2450000 INR → "₹24L", 850000 → "₹8.5L"; 132000 USD → "$132k".
@@ -141,15 +164,19 @@ export function jobLink({ job_id: jobId, url, apply_url: applyUrl }, siteUrl) {
     return /^https?:\/\//.test(url ?? '') ? url : /^https?:\/\//.test(applyUrl ?? '') ? applyUrl : null;
 }
 
+/** One role of the post: "🇮🇳 𝗚𝗼𝗼𝗴𝗹𝗲 — Software Engineer II, Bengaluru" (company in bold, a 🌍 when the country is unknown). */
+function roleLine(job) {
+    return `${COUNTRIES[job.country]?.flag ?? '🌍'} ${bold(job.company)} — ${shortTitle(job.title)}${where(job) ? `, ${where(job)}` : ''}`;
+}
+
 /**
- * The post text: a bold heading naming the biggest companies, the subtitle; for each job a numbered line (company in bold, place in italics), its pay when
- * known (job.pay, see payFor) and its link to the job's page on the site (see jobLink); the most named tech; a link to the
- * board's home page; hashtags.
- * Job titles and hashtags stay plain so LinkedIn search finds them.
+ * The post text: a bold hook against dead listings; what the scraper does and how many jobs `board` ({ live,
+ * countries }) has; a line per job (flag, company in bold, role, city; no links, they go in the first comment, see
+ * buildFirstComment); the follow ask; hashtags. Job titles and hashtags stay plain so LinkedIn search finds them.
  */
-export function buildPost({ id, jobs, siteUrl, hashtags = [], maxHashtags = 8, subtitle = '' }) {
-    const top = mostCommon(jobs.flatMap((j) => j.tags ?? []), 3);
-    const tags = postHashtags(jobs, hashtags, maxHashtags);
+export function buildPost({ jobs, board, hashtags = [], maxHashtags = 12, boardTags = [], scrapeEvery, followAsk }) {
+    const count = liveCount(board.live);
+    const tags = postHashtags(jobs, hashtags, maxHashtags, boardTags);
     // Over LinkedIn's limit: drop hashtags from the end first (down to 3), before any job has to go.
     let body = text(tags);
     while (body.length > MAX_CHARS && tags.length > 3) {
@@ -160,21 +187,36 @@ export function buildPost({ id, jobs, siteUrl, hashtags = [], maxHashtags = 8, s
 
     function text(tags) {
         return [
-            `🚀 ${bold(`Hiring alert: ${jobs.length} new opening${jobs.length === 1 ? '' : 's'} at ${companyNames(jobs)}`)}`,
-            ...(subtitle ? [subtitle] : []),
+            `🚨 ${bold('STOP APPLYING TO DEAD JOB LISTINGS.')}`,
             '',
-            ...jobs.flatMap((j, i) => [
-                `${i + 1}. ${bold(j.company)}: ${j.title}${where(j) ? ` · ${italic(where(j))}` : ''}`,
-                ...(j.pay ? [`💰 ${j.pay}`] : []),
-                ...(jobLink(j, siteUrl) ? [`🔗 ${jobLink(j, siteUrl)}`] : []),
-                '',
-            ]),
-            ...(top.length ? [`🔥 ${bold('In demand:')} ${top.join(', ')}`, ''] : []),
-            `👉 ${bold('More jobs, updated every few hours:')} ${siteUrl.replace(/\/$/, '')}/`,
+            'A posting with "500+ applicants" from 2 weeks ago sends your resume into an unread ATS void. The fix: apply early, while the job is fresh.',
+            '',
+            `My scraper indexes fresh tech roles ${scrapeEvery}. Right now ${count} are live across ${countryList(board.countries)}.`,
+            '',
+            '🔥 Fresh roles at top companies:',
+            ...jobs.map(roleLine),
+            '',
+            `⚡ ${bold(followAsk)}`,
+            `👇 All ${count} jobs with direct apply links are in the first comment.`,
             '',
             tags.map((t) => `#${t}`).join(' '),
         ].join('\n');
     }
+}
+
+/**
+ * The post's first comment, where the links go (a link in the post itself makes LinkedIn show it to fewer people):
+ * the board's home page, then each role of the post with its pay when known (job.pay, see payFor) and its page on
+ * the site (see jobLink).
+ */
+export function buildFirstComment({ jobs, board, siteUrl }) {
+    return [
+        `🔎 All ${liveCount(board.live)} live jobs, with apply links and filters: ${siteUrl.replace(/\/$/, '')}/`,
+        '',
+        'The roles in this post:',
+        ...jobs.map((j, i) => [`${i + 1}. ${j.company} — ${shortTitle(j.title)}${j.pay ? ` · ${j.pay}` : ''}`, jobLink(j, siteUrl)]
+            .filter(Boolean).join('\n')),
+    ].join('\n');
 }
 
 /**
@@ -186,16 +228,14 @@ export function checkPost(body) {
     const problems = [];
     const text = plain(body);
     const lines = text.split('\n');
-    if (!/^🚀 Hiring alert: \d+ new opening/.test(lines[0] ?? '')) problems.push('first line is not "🚀 Hiring alert: N new openings…"');
+    if (!/^🚨 STOP APPLYING TO DEAD JOB LISTINGS\./.test(lines[0] ?? '')) problems.push('first line is not "🚨 STOP APPLYING TO DEAD JOB LISTINGS."');
     // Counted on the raw text, where a bold letter takes two units, to stay safely under LinkedIn's limit.
     const length = String(body ?? '').length;
     if (length > MAX_CHARS) problems.push(`${length} characters, LinkedIn allows ${MAX_CHARS}`);
-    const jobs = lines.filter((l) => /^\d+\. .+: .+/.test(l)).length;
-    if (jobs < 1 || jobs > 15) problems.push(`${jobs} job lines, expected 1 to 15`);
-    const links = text.match(/https?:\/\/\S+/g) ?? [];
-    const home = links.filter((l) => /^https?:\/\/[^/\s]+\/?$/.test(l));
-    if (home.length !== 1 || home[0] !== links.at(-1)) problems.push('needs one link to the board\'s home page, after all the others');
-    if (links.length - 1 > jobs) problems.push(`${links.length - 1} job links for ${jobs} jobs`);
+    const jobs = lines.filter((l) => /^(\p{Regional_Indicator}{2}|🌍) .+ — .+/u.test(l)).length;
+    if (jobs < 1 || jobs > 8) problems.push(`${jobs} role lines ("🇮🇳 Company — Role, City"), expected 1 to 8`);
+    if (/https?:\/\//.test(text)) problems.push('has a link: links go in the first comment');
+    if (!/first comment\./.test(lines.at(-3) ?? '')) problems.push('the line before the hashtags should point to the first comment');
     const tags = (lines.at(-1) ?? '').match(/#\w+/g) ?? [];
     if (tags.length < 1 || tags.length > 30) problems.push(`${tags.length} hashtags on the last line, expected 1 to 30`);
     if (/\b(undefined|null|NaN)\b/.test(text)) problems.push('contains "undefined", "null" or "NaN"');
@@ -262,16 +302,35 @@ async function main() {
     const made = [];
     try {
         // scrap-py sets jobs.category rather than role; it gives the role hashtags (ai → #machinelearning).
-        // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql).
+        // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql). The
+        // first job of each company comes first, so a post names as many different companies as it can.
         const { rows: candidates } = await store.query(
             `SELECT pc.*, COALESCE(pc.role, CASE j.category WHEN 'ai' THEN 'ml' ELSE j.category END) AS role,
-                    j.seniority, c.hashtag AS company_tag
+                    j.seniority, c.hashtag AS company_tag,
+                    (SELECT l.country FROM job_search_hits h JOIN locations l ON l.id = h.location_id
+                     WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.priority, l.id LIMIT 1) AS country
              FROM post_candidates pc JOIN jobs j USING (source, job_id) LEFT JOIN companies c ON c.slug = pc.company_slug
-             ORDER BY pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
+             ORDER BY pc.nth_at_company, pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
         const { rows: salaries } = await store.query(
             `SELECT company_slug, query, currency, median_annual::float AS median FROM company_salaries
              WHERE company_slug = ANY($1) ORDER BY median_annual DESC`, [[...new Set(candidates.map((j) => j.company_slug))]]);
         for (const job of candidates) job.pay = payFor(job, salaries);
+        // What the post says about the board: its live jobs and the countries they are in, and the brand tags of the
+        // top premium companies (most jobs this week) to fill the hashtags.
+        const { rows: [{ live }] } = await store.query(
+            `SELECT COUNT(*)::int AS live FROM jobs WHERE status <> 'skipped' AND closed_at IS NULL`);
+        const { rows: countries } = await store.query(
+            `SELECT l.country FROM job_search_hits h JOIN locations l ON l.id = h.location_id
+             JOIN jobs j ON j.source = h.source AND j.job_id = h.job_id
+             WHERE j.status <> 'skipped' AND j.closed_at IS NULL AND l.country IS NOT NULL
+             GROUP BY l.country HAVING COUNT(DISTINCT (h.source, h.job_id)) >= 50
+             ORDER BY COUNT(DISTINCT (h.source, h.job_id)) DESC`);
+        const { rows: top } = await store.query(
+            `SELECT c.hashtag FROM companies c JOIN company_index ci ON ci.slug = c.slug
+             WHERE c.premium_tier = 1 AND c.hashtag IS NOT NULL ORDER BY ci.jobs_week DESC, c.name LIMIT 8`);
+        const board = { live, countries: countries.map((r) => r.country) };
+        const options = { board, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, boardTags: top.map((r) => r.hashtag),
+            scrapeEvery: cfg.scrapeEvery, followAsk: cfg.followAsk };
         const split = splitJobs(candidates, cfg.people, cfg.jobsPerPost);
         for (const person of cfg.people) {
             let jobs = split.get(person.id);
@@ -286,13 +345,14 @@ async function main() {
                 continue;
             }
             const { rows: [{ id }] } = await store.query('INSERT INTO posts (person) VALUES ($1) RETURNING id', [person.id]);
-            let body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, subtitle: cfg.subtitle });
+            let body = buildPost({ jobs, ...options });
             // Over LinkedIn's limit (very long titles): leave the last jobs for the next post, down to minJobs.
             while (body.length > MAX_CHARS && jobs.length > cfg.minJobs) {
                 jobs = jobs.slice(0, -1);
-                body = buildPost({ id, jobs, siteUrl: cfg.siteUrl, hashtags: cfg.hashtags, maxHashtags: cfg.maxHashtags, subtitle: cfg.subtitle });
+                body = buildPost({ jobs, ...options });
             }
-            await store.query('UPDATE posts SET body = $2 WHERE id = $1', [id, body]);
+            await store.query('UPDATE posts SET body = $2, first_comment = $3 WHERE id = $1',
+                [id, body, buildFirstComment({ jobs, board, siteUrl: cfg.siteUrl })]);
             for (const [i, j] of jobs.entries()) {
                 await store.query('INSERT INTO post_jobs (post_id, source, job_id, position) VALUES ($1, $2, $3, $4)',
                     [id, j.source, j.job_id, i + 1]);

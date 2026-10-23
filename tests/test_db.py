@@ -119,6 +119,7 @@ TITLES = {   # real titles from the jobs table: in a post or not
     "Sr. Java Developer": False,
     "Lead Data Engineer": False,
     "Staff Engineer, Platform": False,
+    "AI Operations Engineering Technical Leader": False,
     "Engineering Manager": False,
     "Python Developer Assistant Vice President": False,
     "Customer Engineer, Cloud AI, Financial Services, Google Cloud": False,
@@ -167,3 +168,8 @@ def test_posts_take_only_tier_1_companies_with_a_real_logo(conn):
     conn.execute("UPDATE companies SET premium_tier = 1, is_premium = true WHERE slug = 'tiny-startup'")
     conn.execute(open(os.path.join(db.HERE, "premium.sql"), encoding="utf-8").read())
     assert conn.execute("SELECT premium_tier, is_premium FROM companies WHERE slug = 'tiny-startup'").fetchone() == (None, False)
+
+
+def test_post_first_comment_is_read_through_the_posts_view(conn):
+    post_id = conn.execute("INSERT INTO posts (person, body, first_comment) VALUES ('animesh', 'b', 'links here') RETURNING id").fetchone()[0]
+    assert conn.execute('SELECT "firstComment" FROM public_linkedin_posts WHERE id = %s', (post_id,)).fetchone()[0] == "links here"

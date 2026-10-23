@@ -86,14 +86,22 @@ function postCard(p) {
     copy.textContent = 'Copied';
     setTimeout(() => { copy.textContent = 'Copy text'; }, 1500);
   };
+  const copyComment = el('button', { type: 'button', className: 'quiet', textContent: 'Copy first comment' });
+  copyComment.onclick = async () => {
+    await navigator.clipboard.writeText(p.firstComment ?? '');
+    copyComment.textContent = 'Copied';
+    setTimeout(() => { copyComment.textContent = 'Copy first comment'; }, 1500);
+  };
   const posted = safeUrl(p.linkedinUrl);
   return el('article', { className: 'post' },
     el('div', { className: 'head' },
       el('span', { className: `chip ${p.status}`, textContent: p.status }),
       `Post ${p.id} · ${p.jobs} jobs · ${new Date(p.createdAt).toLocaleString()}`),
     el('pre', { textContent: p.body ?? '' }),
+    p.firstComment && el('pre', { textContent: `First comment:\n${p.firstComment}` }),
     el('div', { className: 'actions' },
       copy,
+      p.firstComment && copyComment,
       el('a', { href: `alert.html?id=${p.id}`, target: '_blank', textContent: 'Openings page' }),
       posted && el('a', { href: posted, target: '_blank', rel: 'noopener', textContent: 'On LinkedIn' })));
 }
