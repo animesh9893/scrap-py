@@ -48,7 +48,7 @@ export function plain(text) {
 
 // "Bengaluru, Karnataka, India" → "Bengaluru"; remote jobs say so.
 function where({ location, workplace }) {
-    const city = String(location ?? '').split(',')[0].trim();
+    const city = String(location ?? '').split(',')[0].trim().replace(/\s+division$/i, '');   // LinkedIn's "Pune Division"
     if (workplace === 'remote') return /remote/i.test(city) || !city ? 'Remote' : `${city} (Remote)`;
     return city;
 }
@@ -67,7 +67,8 @@ const ROLE_TAGS = {
 const CITY_TAGS = { bengaluru: 'bangalore', gurugram: 'gurgaon', newdelhi: 'delhi', navimumbai: 'mumbai', newyorkcity: 'newyork',
     sanfranciscobayarea: 'sanfrancisco', bombay: 'mumbai', madras: 'chennai' };
 function cityTag(city) {
-    const name = hashtag(String(city).replace(/^greater\s+/i, '').replace(/\s+(metropolitan\s+)?(area|region)$/i, ''));
+    const name = hashtag(String(city).replace(/^greater\s+/i, '').replace(/\s+(metropolitan\s+)?(area|region|division)$/i, '')
+        .replace(/\s+(east|west|north|south)$/i, ''));   // "Bengaluru East" → bangalore
     return name ? `${CITY_TAGS[name] ?? name}jobs` : null;
 }
 

@@ -45,6 +45,15 @@ test('post follows the template and passes the check', () => {
     assert.deepEqual(checkPost(body), []);
 });
 
+test('LinkedIn place names are cleaned for the role line and city tags', () => {
+    const jobs = [job(1, { location: 'Pune Division, Maharashtra, India' }), job(2, { location: 'Bengaluru East, Karnataka, India' })];
+    const body = buildPost({ jobs, ...options });
+    assert.match(plain(body), /Engineer 1, Pune\n/);
+    assert.match(body.split('\n').at(-1), /#punejobs/);
+    assert.match(body.split('\n').at(-1), /#bangalorejobs/);
+    assert.doesNotMatch(body, /division|eastjobs/i);
+});
+
 test('freshness: the oldest job in the post, rounded up', () => {
     const now = new Date('2026-10-23T22:00:00Z');
     const at = (iso) => ({ first_seen_at: iso });
