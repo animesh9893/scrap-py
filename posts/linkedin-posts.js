@@ -305,13 +305,17 @@ async function main() {
         // scrap-py sets jobs.category rather than role; it gives the role hashtags (ai → #machinelearning).
         // post_candidates holds only entry and mid level software jobs at tier 1 premium companies (base.sql). Jobs
         // found in the last 6 hours come first (the heading says how fresh they are), then the first job of each
-        // company, so a post names as many different companies as it can.
+        // company, so a post names as many different companies as it can. Only openings in India or remote ones: India
+        // in the location, or found by a search of an Indian location (LinkedIn writes some as "Greater Bengaluru Area").
         const { rows: candidates } = await store.query(
             `SELECT pc.*, COALESCE(pc.role, CASE j.category WHEN 'ai' THEN 'ml' ELSE j.category END) AS role,
                     j.seniority, c.hashtag AS company_tag,
                     (SELECT l.country FROM job_search_hits h JOIN locations l ON l.id = h.location_id
                      WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.priority, l.id LIMIT 1) AS country
              FROM post_candidates pc JOIN jobs j USING (source, job_id) LEFT JOIN companies c ON c.slug = pc.company_slug
+             WHERE pc.workplace = 'remote' OR pc.location ILIKE '%india%'
+                OR EXISTS (SELECT 1 FROM job_search_hits h JOIN locations l ON l.id = h.location_id
+                           WHERE h.source = j.source AND h.job_id = j.job_id AND l.country = 'IN')
              ORDER BY pc.first_seen_at > now() - interval '6 hours' DESC, pc.nth_at_company, pc.score DESC, pc.first_seen_at DESC LIMIT $1`, [cfg.jobsPerPost * cfg.people.length]);
         const { rows: salaries } = await store.query(
             `SELECT company_slug, query, currency, median_annual::float AS median FROM company_salaries
