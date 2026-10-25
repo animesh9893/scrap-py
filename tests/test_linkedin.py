@@ -2,6 +2,7 @@
 
 import os
 import time
+from datetime import datetime, timezone
 
 import jobspy.linkedin
 
@@ -12,8 +13,9 @@ FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
 
 def page(name):
+    """A saved page, its listing dates moved to today so they stay inside the search's hours_old window."""
     with open(os.path.join(FIXTURES, name), encoding="utf-8") as f:
-        return f.read()
+        return f.read().replace('datetime="2026-10-21"', f'datetime="{datetime.now(timezone.utc).date()}"')
 
 
 class Response:

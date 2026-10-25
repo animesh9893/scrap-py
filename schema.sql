@@ -111,6 +111,38 @@ CREATE OR REPLACE FUNCTION expire_jobs(days INTEGER) RETURNS INTEGER LANGUAGE sq
     SELECT COUNT(*)::int FROM closed
 $$;
 
+-- Deletes jobs posted more than `max_age` ago, so the database holds only fresh ones. Age is LinkedIn's posted time
+-- (jobs.posted_at): to the minute/hour under a day old, else only a date, counted as the end of that day so a job
+-- isn't deleted before it is really `max_age` old; first_seen_at when there is none. Keeps jobs in a LinkedIn post
+-- or alert from the last 30 days, whose links (job.html?id=, alert.html) still get clicked. Their search hits go
+-- with them (ON DELETE CASCADE). Returns how many it deleted. Run by pg_cron every hour (below).
+CREATE OR REPLACE FUNCTION delete_old_jobs(max_age INTERVAL DEFAULT '48 hours') RETURNS INTEGER
+    LANGUAGE sql SET search_path = public AS $$
+    WITH gone AS (
+        DELETE FROM jobs j
+        WHERE COALESCE(CASE WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}$'
+                                THEN (j.posted_at::date + 1)::timestamp AT TIME ZONE 'UTC'
+                            WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}T' THEN j.posted_at::timestamptz END,
+                       j.first_seen_at) < now() - max_age
+          AND NOT EXISTS (SELECT 1 FROM post_jobs pj JOIN posts p ON p.id = pj.post_id
+                          WHERE pj.source = j.source AND pj.job_id = j.job_id
+                            AND p.created_at > now() - interval '30 days')
+        RETURNING 1)
+    SELECT COUNT(*)::int FROM gone
+$$;
+
+-- Hourly cleanup in the database itself (Supabase's pg_cron), so it doesn't depend on a GitHub schedule. Skipped
+-- where pg_cron isn't available (the tests' plain Postgres); cron.schedule replaces a job of the same name.
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_available_extensions WHERE name = 'pg_cron') THEN
+        CREATE EXTENSION IF NOT EXISTS pg_cron;
+        PERFORM cron.schedule('delete-old-jobs', '23 * * * *', 'SELECT public.delete_old_jobs()');
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    RAISE WARNING 'delete-old-jobs not scheduled: %', SQLERRM;
+END $$;
+
 -- Each company's jobs: open now, first seen in the last 7 / 30 days, and the latest one.
 CREATE OR REPLACE VIEW company_stats AS
     SELECT c.slug,

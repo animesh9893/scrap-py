@@ -2,7 +2,7 @@
 Skipped unless TEST_DATABASE_URL is set; the test empties the tables it uses, so never point it at Supabase."""
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -173,3 +173,21 @@ def test_posts_take_only_tier_1_companies_with_a_real_logo(conn):
 def test_post_first_comment_is_read_through_the_posts_view(conn):
     post_id = conn.execute("INSERT INTO posts (person, body, first_comment) VALUES ('animesh', 'b', 'links here') RETURNING id").fetchone()[0]
     assert conn.execute('SELECT "firstComment" FROM public_linkedin_posts WHERE id = %s', (post_id,)).fetchone()[0] == "links here"
+
+
+def test_delete_old_jobs_keeps_fresh_and_recently_posted_ones(conn):
+    conn.execute("TRUNCATE posts, post_jobs")
+    hours = lambda h: (datetime.now(timezone.utc) - timedelta(hours=h)).isoformat(timespec="minutes")
+    day = lambda d: (datetime.now(timezone.utc) - timedelta(days=d)).date().isoformat()
+    jobs = {"fresh": hours(5), "old": hours(50), "yesterday": day(1), "day_old": day(3), "no_date": None,
+            "old_in_post": hours(60)}
+    for job_id, posted in jobs.items():
+        conn.execute("INSERT INTO jobs (source, job_id, posted_at, first_seen_at) VALUES ('linkedin', %s, %s, %s)",
+                     (job_id, posted, datetime.now(timezone.utc) - timedelta(hours=72 if job_id != "no_date" else 1)))
+    post_id = conn.execute("INSERT INTO posts (person, body) VALUES ('animesh', 'b') RETURNING id").fetchone()[0]
+    conn.execute("INSERT INTO post_jobs (post_id, source, job_id, position) VALUES (%s, 'linkedin', 'old_in_post', 1)",
+                 (post_id,))
+
+    assert conn.execute("SELECT delete_old_jobs()").fetchone()[0] == 2
+    left = {r[0] for r in conn.execute("SELECT job_id FROM jobs").fetchall()}
+    assert left == {"fresh", "yesterday", "no_date", "old_in_post"}
