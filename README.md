@@ -10,7 +10,7 @@ the filters LinkedIn ignores when you're not logged in. Every job comes with its
 **Repos:** changes are pushed to `animesh9893/scrap-py`; `proj-berry/scrap-py` (a fork of it) is the main repo, where
 the schedule runs. After new commits land here, sync the fork (proj-berry/scrap-py → **Sync fork** → **Update branch**).
 
-**On a schedule:** in `proj-berry/scrap-py` only, GitHub runs it every 10 minutes (`cron: '*/10 * * * *'`, UTC) in
+**On a schedule:** in `proj-berry/scrap-py` only, GitHub runs it every 10 minutes, at :07, :17, :27, :37, :47 and :57 (`cron: '7-59/10 * * * *'`, UTC; off the round minutes most schedules use, when GitHub's scheduler is busiest) in
 plan mode: it runs the searches that are due from the [search lists](#search-lists), at most `MAX_TASKS` (4) per run,
 each looking back to just before its previous run. Their artifacts are kept 7 days. GitHub starts scheduled runs on a best-effort
 basis (often a few minutes late, occasionally skipped under load), only from `main`, and pauses them after 60 days

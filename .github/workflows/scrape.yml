@@ -63,7 +63,9 @@ on:
         type: boolean
         default: false
   schedule:
-    - cron: '*/10 * * * *'      # every 10 minutes (UTC); GitHub may start scheduled runs a few minutes late
+    # Every 10 minutes at :07 :17 :27 :37 :47 :57 (UTC). Off the round minutes (:00, :15, :30, ...) most crons use,
+    # when GitHub's scheduler is busiest and starts runs late or drops them.
+    - cron: '7-59/10 * * * *'
   push:
     branches: [main]
     paths: ['*.py', 'sources/**', '*.sql', 'requirements.txt', '.github/workflows/scrape.yml']
