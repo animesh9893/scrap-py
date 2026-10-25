@@ -9,8 +9,8 @@ Supabase project. Node, separate from the Python scraper: `npm ci` and `npm test
    (4) per person and only when they'd get `minJobs` (3) roles, `jobsPerPost` (5) at most. Each job goes into one
    post only, ever. The post: a hook against dead listings, what the scraper does (`scrapeEvery`, keep it true)
    and how many jobs are live, a line per role (flag, company, role, city), the follow ask (`followAsk`) and up to
-   12 hashtags: `config.js`' own, #freshers or #opentowork, three company brand tags (the post's, then the board's
-   top ones), the role, the two main cities and the country. Each role has its page on the site (`job.html?id=`)
+   12 hashtags: `config.js`' own, #freshers or #opentowork, a brand tag for every company in the post (topped up to
+   three with the board's top ones), the role, the two main cities and the country. Each role has its page on the site (`job.html?id=`)
    under it, and the line before the hashtags links to the board.
 2. **Picture** (`post-image.js`): a 1080×1350 PNG with the opening count, a card per company (up to 6) with its
    LinkedIn logo, roles and places, a strip of premium companies (`companies.is_premium`) and the site at the

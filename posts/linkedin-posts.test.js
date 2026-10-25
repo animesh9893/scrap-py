@@ -41,7 +41,7 @@ test('post follows the template and passes the check', () => {
     ]);
     assert.equal(plain(lines.at(-3)), '🔎 Free, no sign-up: all 21,600+ live jobs with direct apply links at https://jobs.example.com/');
     assert.equal(plain(lines.at(-4)), '⚡ Follow me for 4 fresh drops a day.');
-    assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #google #microsoft #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
+    assert.equal(lines.at(-1), '#hiring #techjobs #freshers #amazon #cisco #google #backenddeveloper #bangalorejobs #seattlejobs #canadajobs');
     assert.deepEqual(checkPost(body), []);
 });
 
@@ -131,20 +131,24 @@ test('the n8n workflow runs the same template check', async () => {
     assert.equal(code.split('function plain(').length, 2, 'plain() is in the workflow once');
 });
 
-test('hashtags: core, audience, three companies (the post\'s first, then the board\'s), role, cities, country', () => {
+test('hashtags: core, audience, every company in the post (topped up to three from the board), role, cities, country', () => {
     const jobs = [
         job(1, { role: 'backend', company_tag: 'amazon', seniority: 'Mid-Senior level' }),
         job(2, { role: 'backend', company_tag: 'amazon', location: 'Greater Kolkata Area' }),
         job(3, { role: 'ml', company_tag: 'google', seniority: 'Entry level', location: 'Greater Kolkata Area' }),
-        job(4, { role: 'backend', company_tag: null, location: 'Pune, Maharashtra, India' }),
+        job(4, { role: 'backend', company_tag: null, company: 'Browser Stack', location: 'Pune, Maharashtra, India' }),
+        job(5, { role: 'backend', company_tag: 'uber', location: 'Pune, Maharashtra, India' }),
     ];
     const core = ['hiring', 'TechJobs', 'layoffs'];
     assert.deepEqual(postHashtags(jobs, core, 12, ['microsoft', 'amazon', 'meta']),
-        ['hiring', 'techjobs', 'layoffs', 'freshers', 'amazon', 'google', 'microsoft', 'backenddeveloper', 'kolkatajobs', 'bangalorejobs', 'indiajobs']);
+        ['hiring', 'techjobs', 'layoffs', 'freshers', 'amazon', 'browserstack', 'google', 'uber', 'backenddeveloper', 'kolkatajobs', 'punejobs', 'indiajobs']);
+    // One company: the board's top ones make up three brand tags.
+    assert.deepEqual(postHashtags(jobs.slice(0, 2), [], 12, ['microsoft', 'amazon', 'meta']).slice(1, 4), ['amazon', 'microsoft', 'meta']);
     assert.equal(postHashtags(jobs, core, 4).length, 4);
-    // No entry level job: #opentowork. Mostly remote: #remotejobs. A long or missing brand tag is left out, not padded.
+    // No entry level job: #opentowork. Mostly remote: #remotejobs. No brand tag: the company's name. A long one is
+    // left out, not padded.
     const remote = [job(1, { workplace: 'remote', company_tag: 'averyveryverylongcompanytag', country: 'US' }), job(2, { workplace: 'remote' })];
-    assert.deepEqual(postHashtags(remote, ['hiring'], 12), ['hiring', 'opentowork', 'remotejobs', 'indiajobs']);
+    assert.deepEqual(postHashtags(remote, ['hiring'], 12), ['hiring', 'opentowork', 'co2', 'remotejobs', 'indiajobs']);
 });
 
 test('picture: the post\'s companies get cards, premium then most jobs first; the strip skips them', () => {

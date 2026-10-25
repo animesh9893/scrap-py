@@ -88,24 +88,26 @@ function mostCommon(values, n, rank = () => 0) {
 }
 
 const MAX_TAG = 20;   // longer ones are nobody's hashtag (#greaterkolkataareajobs)
-const COMPANY_TAGS = 3;
+const COMPANY_TAGS = 3;   // at least this many brand tags: the post's companies, then the board's top ones
 
 /**
  * A post's hashtags, at most `max`, each picked on purpose: the configured core ones (#hiring, #layoffs...),
- * #freshers when a job is entry level (else #opentowork), three brand tags (companies.hashtag, job.company_tag): the
- * post's most listed companies first, then the board's top ones (`boardTags`), the most common role, the two most
- * common cities (or #remotejobs) and the main country. A slot with nothing to say is left out, never padded.
+ * #freshers when a job is entry level (else #opentowork), a brand tag for every company in the post (companies.hashtag,
+ * job.company_tag, else its name), most listed first, topped up to three with the board's top ones (`boardTags`), the
+ * most common role, the two most common cities (or #remotejobs) and the main country. A slot with nothing to say is
+ * left out, never padded.
  */
 export function postHashtags(jobs, core = [], max = 12, boardTags = []) {
     const entry = jobs.some((j) => /^(entry level|internship)$/i.test(j.seniority ?? ''));
     const cities = jobs.filter((j) => j.workplace !== 'remote').map((j) => where(j));
     const remote = jobs.filter((j) => j.workplace === 'remote').length > cities.length;
     // Equally listed companies: the ones with the most jobs on the board first.
-    const own = mostCommon(jobs.map((j) => j.company_tag), COMPANY_TAGS, (t) => (boardTags.includes(t) ? boardTags.indexOf(t) : boardTags.length));
+    const own = mostCommon(jobs.map((j) => j.company_tag || hashtag(j.company ?? '')), jobs.length,
+        (t) => (boardTags.includes(t) ? boardTags.indexOf(t) : boardTags.length)).filter((t) => t.length <= MAX_TAG);
     return [...new Set([
         ...core,
         entry ? 'freshers' : 'opentowork',
-        ...[...own, ...boardTags.filter((t) => !own.includes(t))].slice(0, COMPANY_TAGS),
+        ...own, ...boardTags.filter((t) => !own.includes(t)).slice(0, Math.max(0, COMPANY_TAGS - own.length)),
         ...mostCommon(jobs.map((j) => ROLE_TAGS[j.role]), 1),
         ...(remote ? ['remotejobs'] : []),
         ...mostCommon(cities.map(cityTag), 2),
