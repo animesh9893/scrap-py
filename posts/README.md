@@ -34,3 +34,21 @@ The private page `/posts.html` lists every post and its status.
 - Netlify also needs `SUPABASE_URL` and `SUPABASE_SECRET_KEY` for `/api/post-status`.
 
 Keep `checkPost()` in `linkedin-posts.js` and the workflow's "Check against template" node the same; a test checks.
+
+## Posts for other countries (US, Canada)
+
+A separate flow for LinkedIn accounts that post to readers outside India; the India posts above don't change.
+`countries.js` (workflow `.github/workflows/country-posts.yml`, hourly at :47 and on dispatch) writes one post per
+account in `countries-config.js`, with the same template, check and picture, but only jobs found by searches of that
+account's country (never remote or Indian ones, which the India posts take), the country's live count, `#newgrad`
+for `#freshers` and a board link filtered to the country (`?places=…`).
+
+Per account (`<ID>` = its id in `countries-config.js` in capitals, e.g. `USA`):
+
+- Netlify env `POST_TOKEN_<ID>` (functions scope), a new `openssl rand -hex 24`.
+- n8n: import `n8n/country-alert-workflow.json`, set Settings `person` (the account id), `token` and
+  `telegramChatId`; pick the account's LinkedIn credential (and its profile) in both LinkedIn nodes, the GitHub token
+  in "Start country posts" and "Check the run" and the Telegram one; check the schedule (US Eastern time); activate.
+  It has no Telegram trigger: one bot can feed only one n8n trigger, which the India workflow already has.
+- Another country: seed its locations (`../seed.sql`), add it to `countries-config.js` with its flag and country
+  hashtag, and give it an account.

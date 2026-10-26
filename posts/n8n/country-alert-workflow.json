@@ -1,0 +1,836 @@
+{
+  "name": "LinkedIn hiring alert (US)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "0ab0e478-1120-4ecd-a6a1-728271eed695",
+      "name": "Run by hand",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1024,
+        544
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Settings').first().json.supabaseUrl }}/rest/v1/public_post_images",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $node['Check against template'].json.id }}"
+            },
+            {
+              "name": "select",
+              "value": "image"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Settings').first().json.supabaseKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "553461ab-1cb5-468a-946e-7aebf380d29f",
+      "name": "Fetch picture",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1136,
+        304
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "image",
+        "options": {
+          "fileName": "hiring-alert.png",
+          "mimeType": "image/png"
+        }
+      },
+      "id": "0e51435f-d1f2-4b21-8331-619e401a9683",
+      "name": "Picture to file",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        1360,
+        304
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Settings').first().json.supabaseUrl }}/rest/v1/public_post_images",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "=eq.{{ $node['Check against template'].json.id }}"
+            },
+            {
+              "name": "select",
+              "value": "image"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Settings').first().json.supabaseKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "246e23cb-57fc-42b8-b41d-b645e4c88d51",
+      "name": "Fetch picture for LinkedIn",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        208
+      ],
+      "alwaysOutputData": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "operation": "toBinary",
+        "sourceProperty": "image",
+        "options": {
+          "fileName": "hiring-alert.png",
+          "mimeType": "image/png"
+        }
+      },
+      "id": "3614b692-e853-4481-a8af-e24b6d229919",
+      "name": "Picture file for LinkedIn",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2464,
+        208
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "person": "",
+        "text": "={{ $node['Check against template'].json.body }}",
+        "shareMediaCategory": "IMAGE",
+        "additionalFields": {
+          "title": "=Hiring alert: {{ $node['Check against template'].json.jobs }} new openings"
+        }
+      },
+      "id": "23efc6aa-c51e-42e7-8c59-1a168d44adec",
+      "name": "Post to LinkedIn",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        2672,
+        96
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "person": "",
+        "text": "={{ $node['Check against template'].json.body }}",
+        "additionalFields": {}
+      },
+      "id": "3473ed76-e390-42b6-b1b2-e0231606e3ed",
+      "name": "Post text only",
+      "type": "n8n-nodes-base.linkedIn",
+      "typeVersion": 1,
+      "position": [
+        2672,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.siteUrl.replace(/\\/$/, '') }}/api/post-status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Settings').first().json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $node['Check against template'].json.id }}"
+            },
+            {
+              "name": "status",
+              "value": "skipped"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "ed06c2a8-7731-4971-99ce-7ebdfdd12622",
+      "name": "Report declined",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2240,
+        416
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Settings').first().json.telegramChatId }}",
+        "text": "={{ '✅ Posted to LinkedIn: https://www.linkedin.com/feed/update/' + $json.urn }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "parse_mode": "HTML",
+          "disable_web_page_preview": true
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        2896,
+        0
+      ],
+      "id": "8b18bc61-0c0b-478e-a958-8daa2eb33fe7",
+      "name": "Send a text message",
+      "webhookId": "43a51510-f8b5-4f0b-bf05-c412635a2be1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.siteUrl.replace(/\\/$/, '') }}/api/post-status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Settings').first().json.token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $node['Check against template'].json.id }}"
+            },
+            {
+              "name": "status",
+              "value": "posted"
+            },
+            {
+              "name": "linkedinUrl",
+              "value": "=https://www.linkedin.com/feed/update/{{ $json.urn }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1e600e2b-8397-4e72-a6a6-dbaf363b6b80",
+      "name": "Report posted",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2896,
+        192
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/proj-berry/scrap-py/actions/workflows/country-posts.yml/dispatches",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\"ref\": \"main\", \"inputs\": {\"account\": \"usa\", \"force\": \"true\"}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -720,
+        352
+      ],
+      "id": "3d107c55-9716-45ac-be9e-3ce769d49d05",
+      "name": "Start country posts"
+    },
+    {
+      "parameters": {
+        "amount": 90,
+        "unit": "seconds"
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        -496,
+        352
+      ],
+      "id": "c03845de-e2c5-45f1-89a3-6394d701e787",
+      "name": "Wait",
+      "webhookId": "c6fc3ce5-266c-4ddc-8e2f-52514538efd0"
+    },
+    {
+      "parameters": {
+        "url": "https://api.github.com/repos/proj-berry/scrap-py/actions/workflows/country-posts.yml/runs",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpBearerAuth",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "event",
+              "value": "workflow_dispatch"
+            },
+            {
+              "name": "per_page",
+              "value": "1"
+            },
+            {
+              "name": "created",
+              "value": "=>={{ $('Mark start').first().json.startedAt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -272,
+        352
+      ],
+      "id": "0f0b0a13-3518-4290-a58a-5b97f83da3c6",
+      "name": "Check the run"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "8f334764-72de-4c63-ad3b-385ec05b0d43",
+              "leftValue": "={{ $json.workflow_runs?.[0]?.status ?? '' }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -48,
+        352
+      ],
+      "id": "ed1cd917-e627-41ae-b213-d99d2da30622",
+      "name": "Run done?"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 8,12,17,20 * * *"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -960,
+        160
+      ],
+      "id": "e6d1004a-3598-478f-b335-42f43e69e10e",
+      "name": "Schedule"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "f3735aaa-c7f2-4823-be2d-e203a13492a5",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c3f985ab-36ad-4ed6-ba28-dac86e50e231",
+      "name": "Matches template?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        912,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "chatId": "={{ $('Settings').first().json.telegramChatId }}",
+        "text": "={{ ('LinkedIn post ' + $json.id + \" doesn't match the template, so it wasn't sent for approval:\\n\" + $json.problems.join('\\n') + '\\n\\n' + $json.body).replace(/([_*`\\[])/g, '\\\\$1') }}",
+        "additionalFields": {
+          "appendAttribution": false,
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "dbac2ddf-e7cb-470a-bc71-6d1f63d29de1",
+      "name": "Report failed check",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1136,
+        528
+      ],
+      "webhookId": "904e5a1e-ae28-4adb-a324-3e15533674cb"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Same checks as plain() and checkPost() in src/linkedin-posts.js; keep the two in step.\nconst MAX_CHARS = 3000;\nfunction plain(text) {\n    return [...String(text ?? '')].map((ch) => {\n        const cp = ch.codePointAt(0);\n        for (const [start, first, count] of [[0x1d5d4, 65, 26], [0x1d5ee, 97, 26], [0x1d7ec, 48, 10], [0x1d608, 65, 26], [0x1d622, 97, 26]]) {\n            if (cp >= start && cp < start + count) return String.fromCharCode(first + cp - start);\n        }\n        return ch;\n    }).join('');\n}\n\nfunction checkPost(body) {\n    const problems = [];\n    const text = plain(body);\n    const lines = text.split('\\n');\n    if (!/^🚨 STOP APPLYING TO DEAD JOB LISTINGS\\./.test(lines[0] ?? '')) problems.push('first line is not \"🚨 STOP APPLYING TO DEAD JOB LISTINGS.\"');\n    // Counted on the raw text, where a bold letter takes two units, to stay safely under LinkedIn's limit.\n    const length = String(body ?? '').length;\n    if (length > MAX_CHARS) problems.push(`${length} characters, LinkedIn allows ${MAX_CHARS}`);\n    const jobs = lines.filter((l) => /^(\\p{Regional_Indicator}{2}|🌍) .+ — .+/u.test(l)).length;\n    if (jobs < 1 || jobs > 8) problems.push(`${jobs} role lines (\"🇮🇳 Company — Role, City\"), expected 1 to 8`);\n    const links = lines.filter((l) => /^👉 https?:\\/\\/\\S+$/.test(l)).length;\n    if (links !== jobs) problems.push(`${links} job links (\"👉 https://…\") for ${jobs} roles, expected one under each role`);\n    if (!/^🔎 .+ https?:\\/\\/\\S+$/.test(lines.at(-3) ?? '')) problems.push('the line before the hashtags should link to the board (\"🔎 … https://…\")');\n    const tags = (lines.at(-1) ?? '').match(/#\\w+/g) ?? [];\n    if (tags.length < 1 || tags.length > 30) problems.push(`${tags.length} hashtags on the last line, expected 1 to 30`);\n    if (/\\b(undefined|null|NaN)\\b/.test(text)) problems.push('contains \"undefined\", \"null\" or \"NaN\"');\n    return problems;\n}\n\nconst post = $input.first()?.json ?? {};\n// Scheduled run and no draft waiting: nothing to do, stop without a Telegram message.\nif (!post.id && !$('Settings').first().json.postId) return [];\nconst problems = post.id ? checkPost(post.body) : ['post not found'];\nif (post.id && post.status !== 'draft') problems.push(`post is already ${post.status}`);\nreturn [{ json: { id: post.id ?? $('Settings').first().json.postId, body: post.body ?? '', jobs: post.jobs, firstComment: post.firstComment ?? '', valid: problems.length === 0, problems }, pairedItem: { item: 0 } }];\n"
+      },
+      "id": "7beef44e-d1f7-4a9e-b6f3-ab5f7528b8fe",
+      "name": "Check against template",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        704,
+        400
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Settings').first().json.supabaseUrl }}/rest/v1/public_linkedin_posts",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "id",
+              "value": "={{ $('Settings').first().json.postId ? 'eq.' + $('Settings').first().json.postId : 'gt.0' }}"
+            },
+            {
+              "name": "person",
+              "value": "=eq.{{ $('Settings').first().json.person }}"
+            },
+            {
+              "name": "status",
+              "value": "={{ $('Settings').first().json.postId ? 'not.is.null' : 'eq.draft' }}"
+            },
+            {
+              "name": "order",
+              "value": "createdAt.desc"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Settings').first().json.supabaseKey }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "e43b0e86-00e5-4aee-bd55-ef6a2d911ea3",
+      "name": "Fetch post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        480,
+        400
+      ],
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "717e8975-c63d-4c5b-9c3d-1498dbee3b69",
+              "name": "person",
+              "value": "usa",
+              "type": "string"
+            },
+            {
+              "id": "abb4e120-a502-46c9-8ad5-84fe3c4c26f7",
+              "name": "siteUrl",
+              "value": "https://krawlr.xyz",
+              "type": "string"
+            },
+            {
+              "id": "0db5856d-4d59-4bed-b2d2-7dbc148b8bea",
+              "name": "supabaseUrl",
+              "value": "https://ffyfjeybitdhgnmqfaad.supabase.co",
+              "type": "string"
+            },
+            {
+              "id": "810460da-9c5e-4df3-ab5d-c104fc663af9",
+              "name": "supabaseKey",
+              "value": "sb_publishable_dCgX6x1aMH9b1Tqk2u7cgQ_SHBAlCRS",
+              "type": "string"
+            },
+            {
+              "id": "9bf79611-3ad4-4baf-9c06-1ecd9afa978b",
+              "name": "telegramChatId",
+              "value": "YOUR_TELEGRAM_CHAT_ID",
+              "type": "string"
+            },
+            {
+              "id": "178513a0-8eef-4f62-a915-42d901b01c6f",
+              "name": "token",
+              "value": "PASTE_POST_TOKEN_HERE",
+              "type": "string"
+            },
+            {
+              "id": "49a8ca90-2200-4abd-bac4-a167faf57091",
+              "name": "postId",
+              "value": "",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a5cbb06c-3869-4f47-9a02-9d86d671fa39",
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        256,
+        384
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "00000000-0000-4000-8000-000000000001",
+              "name": "startedAt",
+              "type": "string",
+              "value": "={{ $now.minus({ minutes: 2 }).toUTC().toFormat(\"yyyy-MM-dd'T'HH:mm:ss'Z'\") }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "65317260-45a3-4b85-b0d9-28152c12f36a",
+      "name": "Mark start",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -840,
+        352
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run by hand": {
+      "main": [
+        [
+          {
+            "node": "Mark start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch picture": {
+      "main": [
+        [
+          {
+            "node": "Picture to file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Picture to file": {
+      "main": [
+        [
+          {
+            "node": "Fetch picture for LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post text only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch picture for LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Picture file for LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Picture file for LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Post to LinkedIn",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post text only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to LinkedIn": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Report posted",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Post text only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post text only": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Report posted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start country posts": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Check the run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check the run": {
+      "main": [
+        [
+          {
+            "node": "Run done?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run done?": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Schedule": {
+      "main": [
+        [
+          {
+            "node": "Mark start",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Matches template?": {
+      "main": [
+        [
+          {
+            "node": "Fetch picture",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report failed check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check against template": {
+      "main": [
+        [
+          {
+            "node": "Matches template?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch post": {
+      "main": [
+        [
+          {
+            "node": "Check against template",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Fetch post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark start": {
+      "main": [
+        [
+          {
+            "node": "Start country posts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "timezone": "America/New_York",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "nodeGroups": [],
+  "tags": []
+}

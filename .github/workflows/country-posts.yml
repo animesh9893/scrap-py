@@ -1,0 +1,55 @@
+name: LinkedIn posts (US, Canada)
+
+# Writes the LinkedIn posts for readers outside India (posts/countries.js): every hour, one post per account in
+# posts/countries-config.js when its last one is older than everyHours (4), each with jobs in that account's country.
+# Each account's n8n (posts/n8n/country-alert-workflow.json) starts this workflow for its own account, waits for it,
+# then posts the draft. Separate from the India posts (posts.yml), which this never runs or changes. The schedule
+# runs only in proj-berry/scrap-py, which has the DATABASE_URL secret.
+on:
+  workflow_dispatch:
+    inputs:
+      account:
+        description: 'Only this account (an id in posts/countries-config.js, e.g. usa); empty for all'
+        type: string
+        default: ''
+      force:
+        description: 'Write posts now, even if the last one is newer than everyHours'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '47 * * * *'        # every hour, half an hour after the India posts
+  push:
+    branches: [main]
+    paths: ['posts/countries*', 'posts/linkedin-posts.js', 'posts/post-image.js', '.github/workflows/country-posts.yml']
+
+concurrency:
+  group: country-posts          # never write posts twice at once
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  posts:
+    if: github.event_name != 'schedule' || github.repository == 'proj-berry/scrap-py'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: posts
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: posts/package-lock.json
+      - run: npm ci --omit=dev
+      - run: node --test countries.test.js
+      - name: Write posts
+        if: github.event_name != 'push'     # a push only tests
+        run: node countries.js
+        env:
+          ACCOUNT: ${{ inputs.account }}
+          FORCE_POSTS: ${{ inputs.force && 'yes' || '' }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
