@@ -2,3 +2,11 @@
 [build]
   publish = "web"
   functions = "netlify/functions"
+
+# The XML job feed for aggregators such as Jooble: .github/workflows/feed.yml writes it every hour to the "feed"
+# branch of proj-berry/scrap-py (where the schedule runs), and this serves it from the site's own address.
+[[redirects]]
+  from = "/jobs.xml"
+  to = "https://raw.githubusercontent.com/proj-berry/scrap-py/feed/jobs.xml"
+  status = 200
+  force = true

@@ -1,0 +1,45 @@
+name: Job feed
+
+# Writes the XML job feed (feed.py) every hour and pushes it to the "feed" branch as a single commit, replaced each
+# run, so main never fills with feed commits. The site serves it at https://krawlr.xyz/jobs.xml (netlify.toml proxies
+# to the file on proj-berry/scrap-py's feed branch) for aggregators such as Jooble. The schedule runs only in
+# proj-berry/scrap-py, which has the DATABASE_URL secret.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '47 * * * *'        # every hour; GitHub may start scheduled runs a few minutes late
+
+concurrency:
+  group: feed
+  cancel-in-progress: false
+
+permissions:
+  contents: write               # to push the feed branch
+
+jobs:
+  feed:
+    if: github.event_name != 'schedule' || github.repository == 'proj-berry/scrap-py'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: pip install -q "psycopg[binary]>=3.2,<4"
+      - name: Write the feed
+        run: python feed.py out/jobs.xml
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      - name: Push it to the feed branch
+        working-directory: out
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # GitHub refuses files over 100 MB; stop well before that rather than break the push.
+          test "$(stat -c %s jobs.xml)" -lt 90000000
+          git init -q -b feed
+          git add jobs.xml
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "Job feed $(date -u '+%Y-%m-%d %H:%M') UTC"
+          git push -q -f "https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git" feed
