@@ -172,7 +172,7 @@ Each job is a row of the `public.jobs` table, ready to upsert on `(source, job_i
 | `description` | the full description, Markdown |
 | `search_name` | `SEARCH_NAME` (default "&lt;search term&gt; in &lt;location&gt;") |
 | `last_seen_at` | when the job was scraped |
-| `raw` | everything else: `applicants` / `applicants_text`, `apply_type` (easy_apply / company_site), `hiring_team` ([{name, title, url}] from "Meet the hiring team", the poster first; empty for most jobs; the first one is also in the columns `hiring_manager_name` / `_title` / `_url` and on the job page), `salary_min` / `max` / `currency` / `interval`, `job_function`, `industries`, `experience_years` ({min, max}), `sections` (the description cut into `summary`, `responsibilities`, `requirements`, `qualifications`, `benefits`, `about_company` at its headings; best effort), `posted_ago`, `posted_date`, `emails`, `company_logo`, `description_html` (cleaned, safe to embed), `page_read` (false when the job page failed and only the search card's fields are there), and the search |
+| `raw` | everything else: `applicants` / `applicants_text`, `apply_type` (easy_apply / company_site), `hiring_team` ([{name, title, url}] from "Meet the hiring team", the poster first; empty for most jobs; the first one is also in the columns `hiring_manager_name` / `_title` / `_url` and on the job page), `salary_min` / `max` / `currency` / `interval`, `job_function`, `industries`, `experience_years` ({min, max}, max null for "5+ years"; null when the job doesn't say; read by `experience.py`, version in `experience_parser`, also in the columns `experience_min` / `experience_max` behind the site's Experience filter), `sections` (the description cut into `summary`, `responsibilities`, `requirements`, `qualifications`, `benefits`, `about_company` at its headings; best effort), `posted_ago`, `posted_date`, `emails`, `company_logo`, `description_html` (cleaned, safe to embed), `page_read` (false when the job page failed and only the search card's fields are there), and the search |
 
 `status`, `first_seen_at` (table defaults) and `category`, `role`, `level`, `tags`, `tagged_at` (for a tagging step)
 are left out of the rows, so an upsert keeps their values.
@@ -212,6 +212,7 @@ pytest tests
 | `planner.py` | which searches are due |
 | `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now |
 | `report.py` | `jobs.json`, `jobs.csv`, `jobs.md`, `report.html`, `summary.md` |
+| `experience.py` | the years of experience a job asks for, from its title and description (the site's Experience filter) |
 | `db.py`, `schema.sql`, `seed.sql`, `premium.sql` | Supabase (`premium.sql`: the premium companies and their hashtags) |
 | `tests/` | `pytest tests`: LinkedIn against saved pages, the planner; `TEST_DATABASE_URL` (a throwaway Postgres with the old project's schema) adds the database tests. `.github/workflows/test.yml` runs them all on every pull request and push to main, with a Postgres service |
 

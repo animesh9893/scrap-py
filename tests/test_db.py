@@ -1,6 +1,7 @@
 """db.py and planner.plan() against a real Postgres (an empty one is fine: db.connect() creates the tables).
 Skipped unless TEST_DATABASE_URL is set; the test empties the tables it uses, so never point it at Supabase."""
 
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -191,3 +192,22 @@ def test_delete_old_jobs_keeps_fresh_and_recently_posted_ones(conn):
     assert conn.execute("SELECT delete_old_jobs()").fetchone()[0] == 2
     left = {r[0] for r in conn.execute("SELECT job_id FROM jobs").fetchall()}
     assert left == {"fresh", "yesterday", "no_date", "old_in_post"}
+
+
+def test_reparse_experience_and_the_board_filter_columns(conn):
+    import db
+    import experience
+    raw = lambda years, parser: {"experience_years": years, "experience_parser": parser,
+                                 "sections": {"requirements": "* 3-5 years of Java experience"}}
+    rows = [("old", "We have served clients for over 25 years.\n* 3-5 years of Java experience", raw({"min": 25, "max": None}, None)),
+            ("current", "* 2+ years of Go", raw({"min": 9, "max": None}, experience.VERSION)),
+            ("none", "Build things with us.", raw({"min": 4, "max": None}, 1))]
+    for job_id, description, r in rows:
+        conn.execute("""INSERT INTO jobs (source, job_id, title, description, raw, first_seen_at)
+                        VALUES ('linkedin', %s, 'Engineer', %s, %s::jsonb, now())""", (job_id, description, json.dumps(r)))
+
+    assert db.reparse_experience(conn) == 2
+    assert db.reparse_experience(conn) == 0      # all read by this experience.py now
+    got = dict((r[0], r[1:]) for r in conn.execute(
+        """SELECT id, "experienceMin", "experienceMax", "experienceFrom", "experienceTo" FROM public_jobs""").fetchall())
+    assert got == {"old": (3, 5, 3, 5), "current": (9, None, 9, 9), "none": (None, None, 0, 99)}
