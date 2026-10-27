@@ -8,8 +8,9 @@
   save()           one search, in its own transaction: upserts the jobs with upsert_jobs() (new vs seen before),
                    marks the known jobs it found again as seen, records which search found each job in
                    job_search_hits and the run in runs
-  finish()         links jobs to companies (link_companies(), from the old project) and closes jobs not seen for
-                   EXPIRE_DAYS (expire_jobs())
+  finish()         links jobs to companies (link_companies(), from the old project), closes jobs not seen for
+                   EXPIRE_DAYS (expire_jobs()) and re-reads the years of experience of saved jobs read by an older
+                   experience.py (reparse_experience())
 
 Rows come from the sources, shaped like public.jobs; to_db_row() turns them into what the old pipeline stored, so
 the site's views, Telegram alerts and LinkedIn posts read them like any other job.
@@ -24,10 +25,13 @@ import time
 
 import psycopg
 
+import experience
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql"),   # the old project's tables, then ours,
           os.path.join(HERE, "premium.sql")]                                       # then the premium companies
 BATCH = 200      # jobs per upsert_jobs() call
+REPARSE = 3000   # jobs per run whose years of experience reparse_experience() re-reads
 
 log = logging.getLogger(__name__)
 
@@ -193,9 +197,26 @@ def save(conn, search, result):
     return {"new": new, "updated": len(unique) - new, "seen": seen, "run_id": run_id}
 
 
+def reparse_experience(conn, limit=REPARSE):
+    """Re-reads raw.experience_years from the saved title and description of jobs read by an older experience.py
+    (raw.experience_parser below experience.VERSION), up to `limit` a run, so a change there reaches saved jobs
+    over the next runs. Returns how many it re-read."""
+    rows = conn.execute(
+        """SELECT source, job_id, title, description,
+                  concat_ws(E'\n', raw->'sections'->>'requirements', raw->'sections'->>'qualifications')
+           FROM jobs WHERE raw IS NOT NULL AND COALESCE((raw->>'experience_parser')::int, 0) < %s
+           LIMIT %s""", (experience.VERSION, limit)).fetchall()
+    updates = [(json.dumps({"experience_years": experience.years(title, asks, description),
+                            "experience_parser": experience.VERSION}), source, job_id)
+               for source, job_id, title, description, asks in rows]
+    with conn.transaction(), conn.cursor() as cur:
+        cur.executemany("UPDATE jobs SET raw = raw || %s::jsonb WHERE source = %s AND job_id = %s", updates)
+    return len(updates)
+
+
 def finish(conn, expire_days):
-    """After a run's searches. Returns {"linked", "closed"}."""
+    """After a run's searches. Returns {"linked", "closed", "reparsed"}."""
     with conn.transaction():
         linked = conn.execute("SELECT link_companies()").fetchone()[0]
         closed = conn.execute("SELECT expire_jobs(%s)", (expire_days,)).fetchone()[0]
-    return {"linked": linked, "closed": closed}
+    return {"linked": linked, "closed": closed, "reparsed": reparse_experience(conn)}

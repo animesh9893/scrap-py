@@ -150,7 +150,8 @@ def main():
         conn = db.alive(conn, DATABASE_URL)
         done = db.finish(conn, EXPIRE_DAYS)
         line = (f"Saved to Supabase: {sum(r['saved']['new'] for r in results)} new jobs; linked {done['linked']} to "
-                f"companies, closed {done['closed']} not seen for {EXPIRE_DAYS} days.")
+                f"companies, closed {done['closed']} not seen for {EXPIRE_DAYS} days"
+                + (f"; re-read the years of experience of {done['reparsed']} saved jobs." if done["reparsed"] else "."))
         print(f"\n💾 {line}")
         step_summary(f"\n{line}\n")
     if MODE != "single":

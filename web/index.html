@@ -92,6 +92,12 @@
   .places label { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 14px; cursor: pointer; }
   .places label .n { margin-left: auto; color: var(--muted); font-size: 12px; }
   .places input { accent-color: var(--accent); width: 16px; height: 16px; }
+  .exp { appearance: none; -webkit-appearance: none; padding-right: 30px;
+    background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%23888'/%3E%3C/svg%3E") no-repeat right 12px center; }
+  .exp.picked { border-color: var(--accent); }
+  .unstated { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; }
+  .unstated[hidden] { display: none; }
+  .unstated input { accent-color: var(--accent); }
   .places .clear { margin-top: 8px; border: 0; background: none; color: var(--accent); font: inherit; font-size: 14px; cursor: pointer; padding: 0; }
   input[type="search"] {
     width: 100%; padding: 10px 14px; font: inherit; color: var(--text);
@@ -213,6 +219,8 @@
           <summary class="tab"><span aria-hidden="true">📍</span><span class="sel" id="places-label">Any location</span> ▾</summary>
           <div class="panel" id="places-panel" role="group" aria-label="Locations"></div>
         </details>
+        <select class="tab exp" id="exp" aria-label="Years of experience"></select>
+        <label class="unstated" id="unstated-box" hidden><input type="checkbox" id="unstated"> Also show jobs that don't say</label>
       </div>
       <div class="row companies" id="companies" role="group" aria-label="Companies" hidden></div>
       <input type="search" id="q" list="company-names" placeholder="Search title, company or location…" aria-label="Search jobs">
@@ -242,13 +250,18 @@
 <script>
 const PAGE_SIZE = 25;
 const WORKPLACES = [['all', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site / not stated']];
+// Years of experience the job asks for, [from, to]: a job matches when its range (5 to 5 for "5+ years")
+// overlaps the picked one. Read from the description, so jobs that don't state years are left out unless asked.
+const EXPERIENCE = [['', 'Any experience'], ['0-1', 'Fresher (0–1 yrs)'], ['2-3', '2–3 yrs'], ['4-5', '4–5 yrs'],
+  ['6-8', '6–8 yrs'], ['9-99', '9+ yrs']];
+const expRange = (v) => v.split('-').map(Number);
 let CATEGORIES = [['all', 'All']];   // filled from the categories table
 const FALLBACK_CATEGORIES = [['frontend', 'Frontend'], ['backend', 'Backend'], ['fullstack', 'Full stack'], ['mobile', 'Mobile'],
   ['devops', 'DevOps & Cloud'], ['data', 'Data'], ['ai', 'AI / ML'], ['qa', 'QA & Testing'], ['security', 'Security']]
   .map(([slug, label]) => ({ slug, label }));
 let LABEL = {};
 
-const state = { category: 'all', workplace: 'all', places: [], company: '', premium: false, q: '' };
+const state = { category: 'all', workplace: 'all', places: [], exp: '', unstated: false, company: '', premium: false, q: '' };
 let LOCATIONS = [];  // [{ name, country, jobs }] from public_locations, for the location picker
 let COMPANIES = new Map();   // slug → { slug, name, domain, isPremium, jobs, jobsWeek, salaryMin, … }, from public_companies
 const SALARIES = new Map();  // slug → promise of its per-role salaries, highest median first
@@ -270,7 +283,7 @@ const logo = (c) => (c?.logoUrl || c?.domain) && el('img', {
   onerror() { this.remove(); },
 });
 // The category and workplace counts are for all jobs, so they're hidden while other filters narrow the list.
-const countsShown = () => !state.q.trim() && !state.company && !state.premium && !state.places.length;
+const countsShown = () => !state.q.trim() && !state.company && !state.premium && !state.places.length && !state.exp;
 
 // Only link out to http(s) URLs.
 const safeUrl = (u) => { try { const x = new URL(u); return /^https?:$/.test(x.protocol) ? x.href : null; } catch { return null; } };
@@ -312,6 +325,15 @@ function fetchedAgo(dateStr) {
 
 const matchesCategory = (category, c) => c === 'all' || category === c;
 const matchesWorkplace = (workplace, w) => w === 'all' || (w === 'onsite' ? !workplace : workplace === w);
+const matchesExperience = (j, f) => {
+  if (!f.exp) return true;
+  if (j.experienceMin == null) return f.unstated;
+  const [from, to] = expRange(f.exp);
+  return j.experienceMin <= to && (j.experienceMax ?? j.experienceMin) >= from;
+};
+// "3–5 yrs", "5+ yrs", "Fresher": the years the job asks for.
+const yearsLabel = (min, max) => (min == null ? null : min === 0 && max === 0 ? 'Fresher'
+  : max == null ? `${min}+ yrs` : min === max ? `${min} yr${min === 1 ? '' : 's'}` : `${min}–${max} yrs`);
 // Drops characters that have a meaning in Supabase filters.
 const cleanQuery = (q) => q.replace(/[,()*%\\"]/g, ' ').replace(/\s+/g, ' ').trim();
 
@@ -340,6 +362,11 @@ async function supabaseSource() {
       if (f.workplace === 'onsite') query = query.is('workplace', null);
       else if (f.workplace !== 'all') query = query.eq('workplace', f.workplace);
       if (f.places.length) query = query.overlaps('places', f.places);
+      if (f.exp) {
+        const [from, to] = expRange(f.exp);
+        query = query.lte('experienceFrom', to).gte('experienceTo', from);   // 0 to 99 when the job doesn't say
+        if (!f.unstated) query = query.not('experienceMin', 'is', null);
+      }
       if (f.company) query = query.eq('companySlug', f.company);
       if (f.premium) query = query.eq('companyPremium', true);
       const q = cleanQuery(f.q);
@@ -372,7 +399,7 @@ async function jsonSource() {
     async page(f, offset) {
       const q = cleanQuery(f.q).toLowerCase();
       const all = data.jobs.filter((j) => matchesCategory(j.category, f.category) && matchesWorkplace(j.workplace, f.workplace) &&
-        (!f.places.length || f.places.some((p) => j.places?.includes(p))) &&
+        (!f.places.length || f.places.some((p) => j.places?.includes(p))) && matchesExperience(j, f) &&
         (!f.company || j.companySlug === f.company) && (!f.premium || j.companyPremium) &&
         (!q || [j.title, j.company, j.location].some((v) => v && v.toLowerCase().includes(q))));
       return { jobs: all.slice(offset, offset + PAGE_SIZE), total: all.length };
@@ -427,6 +454,17 @@ function renderPlaces() {
   ]), ...(picked.length ? [el('button', { className: 'clear', type: 'button', textContent: 'Clear locations',
     onclick() { state.places = []; sync(); } })] : []));
 }
+function renderExperience() {
+  const select = $('exp');
+  select.replaceChildren(...EXPERIENCE.map(([value, label]) => el('option', { value, textContent: label })));
+  select.value = state.exp;
+  select.classList.toggle('picked', !!state.exp);
+  $('unstated-box').hidden = !state.exp;
+  $('unstated').checked = state.unstated;
+}
+$('exp').onchange = (e) => { state.exp = e.target.value; sync(); };
+$('unstated').onchange = (e) => { state.unstated = e.target.checked; sync(); };
+
 // Closes the picker on a click outside it or Escape.
 document.addEventListener('click', (e) => { if (!$('places').contains(e.target)) $('places').open = false; });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('places').open = false; });
@@ -538,6 +576,8 @@ function jobCard(j) {
   const badges = [
     j.category && el('span', { className: 'badge cat', textContent: LABEL[j.category] ?? j.category }),
     j.workplace && el('span', { className: `badge ${j.workplace}`, textContent: j.workplace === 'remote' ? 'Remote' : 'Hybrid' }),
+    yearsLabel(j.experienceMin, j.experienceMax) && el('span', { className: 'badge',
+      textContent: yearsLabel(j.experienceMin, j.experienceMax), title: 'Years of experience, from the job description' }),
     j.seniority && j.seniority !== 'Not Applicable' && el('span', { className: 'badge', textContent: j.seniority }),
     j.employmentType && el('span', { className: 'badge', textContent: j.employmentType }),
     ...(j.tags ?? []).slice(0, 3).map((t) => el('span', { className: 'badge', textContent: t })),
@@ -598,7 +638,7 @@ async function loadMore() {
   if (more && $('more').getBoundingClientRect().top < innerHeight + 600) loadMore();
 }
 
-// Filters live in the URL (?category=backend&workplace=remote&places=Pune,Remote%20-%20US&company=google&q=react) so filtered views can be shared.
+// Filters live in the URL (?category=backend&workplace=remote&places=Pune,Remote%20-%20US&exp=2-3&company=google&q=react) so filtered views can be shared.
 function sync() {
   const params = new URLSearchParams();
   for (const [k, v] of Object.entries(state)) {
@@ -607,6 +647,7 @@ function sync() {
   history.replaceState(null, '', params.size ? `?${params}` : location.pathname);
   renderTabs();
   renderPlaces();
+  renderExperience();
   renderCompanies();
   renderCompanyInfo();
   resetList();
@@ -618,6 +659,8 @@ function readUrl() {
   if (WORKPLACES.some(([v]) => v === p.get('workplace'))) state.workplace = p.get('workplace');
   const names = new Set(LOCATIONS.map((l) => l.name));
   state.places = (p.get('places') ?? '').split(',').filter((n) => names.has(n));
+  if (EXPERIENCE.some(([v]) => v && v === p.get('exp'))) state.exp = p.get('exp');
+  state.unstated = p.get('unstated') === 'true';
   state.company = p.get('company') ?? '';
   state.premium = p.get('premium') === 'true';
   state.q = p.get('q') ?? '';

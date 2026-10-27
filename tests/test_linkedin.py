@@ -60,7 +60,7 @@ def test_rows_filters_and_known_jobs(monkeypatch):
     assert row["workplace"] == "Hybrid" and row["seniority"] == "Associate"
     assert row["employment_type"] == "Full-time"
     assert row["raw"]["applicants"] == 42 and row["raw"]["apply_type"] == "easy_apply"
-    assert row["raw"]["experience_years"] == {"min": 3, "max": 5}
+    assert row["raw"]["experience_years"] == {"min": 3, "max": 5} and row["raw"]["experience_parser"] == 2
     assert row["raw"]["hiring_team"] == [{"name": "Priya Sharma", "title": "Engineering Manager at Acme Labs",
                                           "url": "https://www.linkedin.com/in/priya-sharma-1a2b3c"}]
     assert result.meta["counts"]["with_hiring_team"] == 1

@@ -27,6 +27,7 @@ from jobspy.linkedin.util import criteria
 from jobspy.model import DescriptionFormat, ScraperInput
 from jobspy.util import check_status, description_fields, get_enum_from_job_type
 
+import experience
 from search import age_hours, is_non_tech, norm
 
 NAME = "linkedin"
@@ -305,13 +306,6 @@ def split_sections(markdown_text):
     return {key: re.sub(r"\n{3,}", "\n\n", "\n".join(lines)).strip() for key, lines in sections.items()}
 
 
-def experience_years(text):
-    """The first "4-6 years" / "5+ years" / "2.00 + years" in the text -> {"min": 4, "max": 6}; None if there is none."""
-    match = re.search(r"(?<![\d.])(\d{1,2})(?:\.\d+)?\s*\+?\s*(?:(?:-|–|to)\s*(\d{1,2})(?:\.\d+)?\s*\+?\s*)?(?:years|yrs)\b",
-                      text or "", re.I)
-    return {"min": int(match[1]), "max": int(match[2]) if match[2] else None} if match else None
-
-
 WORKPLACES = [("Hybrid", r"\bhybrid\b"), ("Remote", r"\bremote\b|work from home|\bwfh\b"),
               ("On-site", r"\bon-?site\b|\bin[- ]office\b|work from office|\bwfo\b")]
 WORKPLACE_WORDS = r"hybrid|remote|on-?site|in-office|wfh|wfo|work from (?:home|office)"
@@ -436,7 +430,8 @@ def row(job, posted_ago, extras, scraped_at, search):
             "job_function": job.job_function,
             "industries": job.company_industry,
             "workplace_source": workplace_source,      # title_or_location | description
-            "experience_years": experience_years(asks) or experience_years(description),
+            "experience_years": experience.years(job.title, asks, description),   # {"min", "max"} or None
+            "experience_parser": experience.VERSION,
             "sections": sections,
             "emails": job.emails or [],
             "company_logo": job.company_logo,

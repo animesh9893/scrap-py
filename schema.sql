@@ -158,8 +158,17 @@ CREATE OR REPLACE VIEW company_stats AS
 -- companies.logo_url holds the newest one per company. LinkedIn's image links expire after some weeks.
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS company_logo TEXT GENERATED ALWAYS AS (raw->>'companyLogo') STORED;
 
--- The site's job list (base.sql has the first version), plus the company logo and "places": the names of the
--- locations (locations.name) whose searches found the job, for the site's location filter.
+-- Years of experience the job asks for (experience.py: raw.experience_years, NULL when it doesn't say), for the
+-- site's Experience filter. db.reparse_experience() re-reads saved jobs when experience.py changes.
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS experience_min SMALLINT
+    GENERATED ALWAYS AS ((raw->'experience_years'->>'min')::smallint) STORED;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS experience_max SMALLINT
+    GENERATED ALWAYS AS ((raw->'experience_years'->>'max')::smallint) STORED;
+
+-- The site's job list (base.sql has the first version), plus the company logo, "places": the names of the
+-- locations (locations.name) whose searches found the job, for the site's location filter, and the years of
+-- experience: "experienceMin"/"experienceMax" as the job says them (max NULL for "5+ years"), and
+-- "experienceFrom"/"experienceTo", the range to filter on (5 to 5 for "5+ years", 0 to 99 when it doesn't say).
 CREATE OR REPLACE VIEW public_jobs AS
     SELECT j.job_id AS id, j.title, j.company, j.location, j.category, j.workplace, j.url,
            j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
@@ -167,7 +176,10 @@ CREATE OR REPLACE VIEW public_jobs AS
            COALESCE(c.is_premium, false) AS "companyPremium", j.role, j.level, j.tags,
            COALESCE(c.logo_url, j.company_logo) AS "companyLogo",
            ARRAY(SELECT DISTINCT l.name FROM job_search_hits h JOIN locations l ON l.id = h.location_id
-                 WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.name) AS places
+                 WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.name) AS places,
+           j.experience_min AS "experienceMin", j.experience_max AS "experienceMax",
+           COALESCE(j.experience_min, 0) AS "experienceFrom",
+           COALESCE(j.experience_max, j.experience_min, 99) AS "experienceTo"
     FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
     WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
 CREATE INDEX IF NOT EXISTS job_search_hits_job ON job_search_hits (source, job_id);
@@ -230,7 +242,8 @@ DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         GRANT SELECT (source, job_id, title, company, location, category, workplace, url, apply_url, salary, description,
                       posted_at, employment_type, seniority, first_seen_at, company_slug, role, level, tags, status,
-                      company_logo, hiring_manager_name, hiring_manager_title, hiring_manager_url)
+                      company_logo, hiring_manager_name, hiring_manager_title, hiring_manager_url,
+                      experience_min, experience_max)
             ON jobs TO anon, authenticated;
         GRANT SELECT (slug, name, domain, is_premium, sort_order, logo_url, employees, glassdoor_rating)
             ON companies TO anon, authenticated;
