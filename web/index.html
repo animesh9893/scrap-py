@@ -191,6 +191,7 @@
     .credits { margin-left: 0; }
   }
 </style>
+<link rel="stylesheet" href="ads.css">
 </head>
 <body>
 <div class="wrap">
@@ -228,17 +229,23 @@
   <div class="site-foot">
     <div class="foot-text">
       <footer id="footer"></footer>
-      <p class="legal">Job data comes from public LinkedIn and Glassdoor pages; not affiliated with either. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a> · <a href="copyright.html">Copyright &amp; takedown</a> · <a href="jobs.xml">Job feed (XML)</a> · Report: <a href="mailto:animesh.shrivatri2002@gmail.com">animesh.shrivatri2002@gmail.com</a></p>
+      <p class="legal">Job data comes from public LinkedIn and Glassdoor pages; not affiliated with either. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a> · <a href="copyright.html">Copyright &amp; takedown</a> · <a href="jobs.xml">Job feed (XML)</a> · Report: <a href="mailto:animesh.shrivatri2002@gmail.com">animesh.shrivatri2002@gmail.com</a> · <a class="sponsored-link" href="https://araplhn.org/4/21ff266c96b2dd857ce7738ae2c0a5fc" rel="sponsored noopener" target="_blank">Sponsored</a></p>
     </div>
     <aside class="credits" aria-label="Developed by">
       <p class="credits-title">Developed by</p>
       <a href="https://www.linkedin.com/in/shrivatrianimesh/" rel="noopener" target="_blank">Animesh Shrivatri</a>
       <a href="https://www.linkedin.com/in/sachin-singh-lodhi/" rel="noopener" target="_blank">Sachin Singh Lodhi</a>
     </aside>
+    <div class="ad-slot ad-160x300" data-ad="160x300"><p class="ad-label">Advertisement</p></div>
   </div>
+
+  <aside class="ad-rail" aria-label="Advertisement">
+    <div class="ad-slot ad-160x600" data-ad="160x600"><p class="ad-label">Advertisement</p></div>
+  </aside>
 </div>
 
 <script src="config.js"></script>
+<script src="ads.js"></script>
 <script>
 const PAGE_SIZE = 25;
 const WORKPLACES = [['all', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybrid'], ['onsite', 'On-site / not stated']];
@@ -583,6 +590,7 @@ async function loadMore() {
     if (jobs.length < PAGE_SIZE) list.total = list.shown + jobs.length;
     list.shown += jobs.length;
     $('list').append(...jobs.map(jobItem));
+    window.KrawlrAds?.placeInList($('list'));
     $('count').textContent = `${list.total} job${list.total === 1 ? '' : 's'}`;
     if (list.total === 0) $('list').append(el('li', { className: 'empty', textContent: 'No jobs match these filters.' }));
   } catch {

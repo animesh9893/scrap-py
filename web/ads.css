@@ -1,0 +1,29 @@
+/* Adsterra display units (see ads.js). Every unit is hidden unless the screen has room for it,
+   so phones only ever get the native banner in the job list and the small "Sponsored" link. */
+.ad-slot { display: none; }
+.ad-slot iframe { display: block; border: 0; }
+.ad-label { margin: 0 0 4px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+
+/* 468x60: a strip between jobs or under a job, only where 468px fits without squeezing the page. */
+@media (min-width: 520px) {
+  .ad-slot.ad-468x60 { display: block; width: 468px; max-width: 100%; margin: 6px auto; }
+}
+
+/* 160x300: under Developed by in the sticky left column, only when the window is tall enough
+   for the whole column to stay on screen. */
+@media (min-width: 760px) and (min-height: 860px) {
+  .ad-slot.ad-160x300 { display: block; width: 160px; }
+}
+
+/* 160x600: a sticky right rail beside the list, only on screens wide enough for a third column. */
+.ad-rail { display: none; }
+@media (min-width: 1360px) {
+  .wrap { max-width: 1400px; grid-template-columns: 200px minmax(0, 880px) 160px; }
+  .ad-rail { display: block; grid-column: 3; grid-row: 1; align-self: start; position: sticky; top: 24px; margin-top: 64px; }
+  .ad-rail .ad-slot.ad-160x600 { display: block; width: 160px; }
+}
+
+/* Native banner: one card between jobs, styled like the list around it. */
+.ad-native { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 10px 14px; overflow: hidden; }
+
+.sponsored-link { color: var(--muted); }
