@@ -65,7 +65,33 @@
     header .refresh { grid-column: 1; grid-row: auto; justify-self: start; margin-top: 12px; }
   }
 
-  .controls { margin: 24px 0 8px; display: grid; gap: 12px; }
+  /* The two sections, LinkedIn jobs and Ashby (company career pages): big switch above the filters. */
+  .sections { margin: 24px 0 0; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .section {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 2px 12px; align-items: center; text-align: left;
+    padding: 12px 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface);
+    color: var(--text); font: inherit; cursor: pointer; transition: border-color .15s, box-shadow .15s;
+  }
+  .section:hover { border-color: var(--accent); }
+  .section:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .section[aria-pressed="true"] { border: 2px solid var(--accent); padding: 11px 13px; background: var(--accent-soft); }
+  .section .mark {
+    grid-row: span 2; width: 36px; height: 36px; border-radius: 9px; display: grid; place-items: center;
+    font-weight: 700; font-size: 15px; color: #fff;
+  }
+  .section .mark.linkedin { background: #0a66c2; }
+  .section .mark.ashby { background: #5b4cdb; }
+  .section .name { font-weight: 650; font-size: 15px; }
+  .section .total { grid-row: span 2; font-size: 13px; color: var(--muted); white-space: nowrap; }
+  .section[aria-pressed="true"] .total { color: var(--accent); font-weight: 600; }
+  .section .about { grid-column: 2; font-size: 13px; color: var(--muted); line-height: 1.35; }
+  @media (max-width: 560px) {
+    .sections { grid-template-columns: 1fr; }
+  }
+  .company-info .board { display: inline-block; margin-top: 6px; font-size: 14px; color: var(--accent); font-weight: 600; text-decoration: none; }
+  .company-info .board:hover { text-decoration: underline; }
+
+  .controls { margin: 16px 0 8px; display: grid; gap: 12px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .tab {
     border: 1px solid var(--border); background: var(--surface); color: var(--text);
@@ -206,11 +232,13 @@
     <nav class="site-links" aria-label="Site policies"><a href="terms.html">Terms</a><a href="privacy.html">Privacy</a><a href="copyright.html">Copyright</a><a href="jobs.xml" title="XML feed of the jobs from the last 48 hours, updated every hour, free for job sites and aggregators">Job feed (XML)</a></nav>
     <header>
       <div class="brand"><img src="logo.svg" alt=""><h1 id="title">Tech Jobs</h1></div>
-      <p>Tech jobs only: frontend, backend, full stack, mobile, DevOps, data, AI, QA and security, in India, the US, Canada and remote.</p>
+      <p>Tech jobs only: frontend, backend, full stack, mobile, DevOps, data, AI, QA and security. Pick a section: LinkedIn jobs in India, the US, Canada and remote, or jobs straight from startups' Ashby career pages.</p>
       <button class="refresh" id="refresh" type="button"><span class="icon" aria-hidden="true">↻</span> Refresh jobs</button>
     </header>
     <p class="fresh">🔔 New jobs are added every few hours. <button type="button" id="refresh2">Refresh</button> to see the latest.</p>
     <button class="refresh floating" id="refresh3" type="button" hidden><span class="icon" aria-hidden="true">↻</span> Refresh</button>
+
+    <nav class="sections" id="sections" aria-label="Job sections"></nav>
 
     <div class="controls">
       <div class="row" id="categories" role="group" aria-label="Category"></div>
@@ -237,7 +265,7 @@
   <div class="site-foot">
     <div class="foot-text">
       <footer id="footer"></footer>
-      <p class="legal">Job data comes from public LinkedIn and Glassdoor pages; not affiliated with either. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a> · <a href="copyright.html">Copyright &amp; takedown</a> · <a href="jobs.xml">Job feed (XML)</a> · Report: <a href="mailto:animesh.shrivatri2002@gmail.com">animesh.shrivatri2002@gmail.com</a> · <a class="sponsored-link" href="https://araplhn.org/4/21ff266c96b2dd857ce7738ae2c0a5fc" rel="sponsored noopener" target="_blank">Sponsored</a></p>
+      <p class="legal">Job data comes from public LinkedIn and Glassdoor pages and companies' public Ashby job boards; not affiliated with any of them. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a> · <a href="copyright.html">Copyright &amp; takedown</a> · <a href="jobs.xml">Job feed (XML)</a> · Report: <a href="mailto:animesh.shrivatri2002@gmail.com">animesh.shrivatri2002@gmail.com</a> · <a class="sponsored-link" href="https://araplhn.org/4/21ff266c96b2dd857ce7738ae2c0a5fc" rel="sponsored noopener" target="_blank">Sponsored</a></p>
     </div>
     <aside class="credits" aria-label="Developed by">
       <p class="credits-title">Developed by</p>
@@ -262,18 +290,24 @@ const WORKPLACES = [['all', 'Anywhere'], ['remote', 'Remote'], ['hybrid', 'Hybri
 const EXPERIENCE = [['', 'Any experience'], ['0-1', 'Fresher (0–1 yrs)'], ['2-3', '2–3 yrs'], ['4-5', '4–5 yrs'],
   ['6-8', '6–8 yrs'], ['9-99', '9+ yrs']];
 const expRange = (v) => v.split('-').map(Number);
+// The site's sections, one per kind of source: LinkedIn searches, and companies' own Ashby job boards.
+const SECTIONS = [
+  { id: 'linkedin', mark: 'in', name: 'LinkedIn jobs', about: 'Fresh LinkedIn posts in India, the US, Canada and remote' },
+  { id: 'ashby', mark: 'A', name: 'Ashby jobs', about: "Straight from 3,400+ startups' Ashby career pages, worldwide" },
+];
 let CATEGORIES = [['all', 'All']];   // filled from the categories table
 const FALLBACK_CATEGORIES = [['frontend', 'Frontend'], ['backend', 'Backend'], ['fullstack', 'Full stack'], ['mobile', 'Mobile'],
   ['devops', 'DevOps & Cloud'], ['data', 'Data'], ['ai', 'AI / ML'], ['qa', 'QA & Testing'], ['security', 'Security']]
   .map(([slug, label]) => ({ slug, label }));
 let LABEL = {};
 
-const state = { category: 'all', workplace: 'all', places: [], exp: '', unstated: false, company: '', premium: false, q: '' };
+const state = { source: 'linkedin', category: 'all', workplace: 'all', places: [], exp: '', unstated: false, company: '', premium: false, q: '' };
 let LOCATIONS = [];  // [{ name, country, jobs }] from public_locations, for the location picker
-let COMPANIES = new Map();   // slug → { slug, name, domain, isPremium, jobs, jobsWeek, salaryMin, … }, from public_companies
+let COMPANIES = new Map();   // slug → { slug, name, domain, isPremium, jobs, jobsWeek, salaryMin, careersUrl, … }, from public_companies
+let BOARDS = [];             // companies with an Ashby board and jobs listed, most jobs first, from public_company_boards
 const SALARIES = new Map();  // slug → promise of its per-role salaries, highest median first
 let source;        // where jobs come from: Supabase or jobs.json, same interface
-let counts = [];   // [{ category, workplace, n }] for the tab counts
+let counts = [];   // [{ source, category, workplace, n }] for the section and tab counts
 const list = { shown: 0, total: null, loading: false, generation: 0 };
 
 const $ = (id) => document.getElementById(id);
@@ -316,7 +350,7 @@ function postedAgo(j) {
   if (mins < 24 * 60) return `Posted ${Math.floor(mins / 60)}h ago`;
   return `Posted ${Math.floor(mins / 1440)}d ago`;
 }
-const whenTitle = (j) => [j.postedAt && `Posted on LinkedIn: ${new Date(j.postedAt).toLocaleString()}`,
+const whenTitle = (j) => [j.postedAt && `Posted on ${j.source === 'ashby' ? 'the company\'s Ashby board' : 'LinkedIn'}: ${new Date(j.postedAt).toLocaleString()}`,
   j.firstSeenAt && `Found: ${new Date(j.firstSeenAt).toLocaleString()}`].filter(Boolean).join('\n');
 
 // "Fetched 5m ago" / "2h ago" / "3d ago": when the scraper first found the job.
@@ -350,9 +384,16 @@ async function supabaseSource() {
   const db = createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY, { auth: { persistSession: false } });
   const run = async (query) => { const { data, count, error } = await query; if (error) throw error; return { data, count }; };
   return {
-    footer: 'Live listings, updated after every scrape. Open a job for its details and the link to apply on LinkedIn.',
+    footer: 'Live listings, updated after every scrape. Open a job for its details and the link to apply.',
     categories: async () => (await run(db.from('public_categories').select('slug, label').order('sort_order').order('slug'))).data,
-    counts: async () => (await run(db.from('public_job_counts').select('*'))).data,
+    // Per section; before the database has the sections (public_source_counts), every job is LinkedIn's.
+    counts: async () => {
+      try { return (await run(db.from('public_source_counts').select('*'))).data; } catch {
+        return (await run(db.from('public_job_counts').select('*'))).data.map((r) => ({ ...r, source: 'linkedin' }));
+      }
+    },
+    boards: async () => (await run(db.from('public_company_boards').select('*').gt('jobs', 0)
+      .order('jobs', { ascending: false }).limit(1000))).data,
     locations: async () => (await run(db.from('public_locations').select('name, country, jobs')
       .order('priority').order('name'))).data,
     // Premium companies plus the ones with the most listed jobs, for the chips and the search suggestions.
@@ -361,10 +402,12 @@ async function supabaseSource() {
     salaries: async (slug) => (await run(db.from('public_company_salaries').select('title, currency, min, median, max')
       .eq('companySlug', slug).order('median', { ascending: false, nullsFirst: false }).order('title'))).data,
     async page(f, offset) {
+      if (!this.sections && f.source !== 'linkedin') return { jobs: [], total: 0 };
       let query = db.from('public_jobs').select('*', offset === 0 ? { count: 'exact' } : {})
         .order('postedAt', { ascending: false, nullsFirst: false }).order('firstSeenAt', { ascending: false })
         .order('id')   // id breaks ties, so pages never overlap
         .range(offset, offset + PAGE_SIZE - 1);
+      if (this.sections) query = query.eq('source', f.source);
       if (f.category !== 'all') query = query.eq('category', f.category);
       if (f.workplace === 'onsite') query = query.is('workplace', null);
       else if (f.workplace !== 'all') query = query.eq('workplace', f.workplace);
@@ -378,9 +421,17 @@ async function supabaseSource() {
       if (f.premium) query = query.eq('companyPremium', true);
       const q = cleanQuery(f.q);
       if (q) query = query.or(['title', 'company', 'location'].map((c) => `${c}.ilike.*${q}*`).join(','));
-      const { data, count } = await run(query);
-      return { jobs: data, total: count };
+      try {
+        const { data, count } = await run(query);
+        return { jobs: data, total: count };
+      } catch (e) {
+        // public_jobs without the source column yet (the database updates on the next scrape): LinkedIn only.
+        if (!this.sections || e?.code !== '42703') throw e;
+        this.sections = false;
+        return this.page(f, offset);
+      }
     },
+    sections: true,
   };
 }
 
@@ -391,21 +442,23 @@ async function jsonSource() {
   const data = await r.json();
   const tally = new Map();
   for (const j of data.jobs) {
-    const key = `${j.category}|${j.workplace}`;
-    tally.set(key, { category: j.category, workplace: j.workplace, n: (tally.get(key)?.n ?? 0) + 1 });
+    const s = j.source ?? 'linkedin';
+    const key = `${s}|${j.category}|${j.workplace}`;
+    tally.set(key, { source: s, category: j.category, workplace: j.workplace, n: (tally.get(key)?.n ?? 0) + 1 });
   }
   return {
     title: data.title,
-    footer: `Updated ${new Date(data.generatedAt).toLocaleString()}. Open a job for its details and the link to apply on LinkedIn.`,
+    footer: `Updated ${new Date(data.generatedAt).toLocaleString()}. Open a job for its details and the link to apply.`,
     categories: async () => data.categories ?? [...new Set(data.jobs.map((j) => j.category).filter(Boolean))].map((slug) => ({ slug, label: slug })),
     counts: async () => [...tally.values()],
     locations: async () => [...new Set(data.jobs.flatMap((j) => j.places ?? []))].map((name) => ({ name, country: null,
       jobs: data.jobs.filter((j) => j.places?.includes(name)).length })),
     companies: async () => data.companies ?? [],
+    boards: async () => data.boards ?? [],
     salaries: async (slug) => (data.salaries ?? []).filter((s) => s.companySlug === slug),
     async page(f, offset) {
       const q = cleanQuery(f.q).toLowerCase();
-      const all = data.jobs.filter((j) => matchesCategory(j.category, f.category) && matchesWorkplace(j.workplace, f.workplace) &&
+      const all = data.jobs.filter((j) => (j.source ?? 'linkedin') === f.source && matchesCategory(j.category, f.category) && matchesWorkplace(j.workplace, f.workplace) &&
         (!f.places.length || f.places.some((p) => j.places?.includes(p))) && matchesExperience(j, f) &&
         (!f.company || j.companySlug === f.company) && (!f.premium || j.companyPremium) &&
         (!q || [j.title, j.company, j.location].some((v) => v && v.toLowerCase().includes(q))));
@@ -425,8 +478,27 @@ function renderButtons(container, options, key, countFor) {
   }));
 }
 
+// The section switch, with each section's job count (all its jobs, whatever the filters).
+function renderSections() {
+  $('sections').replaceChildren(...SECTIONS.map((s) => {
+    const n = counts.filter((r) => r.source === s.id).reduce((t, r) => t + r.n, 0);
+    const b = el('button', { className: 'section', type: 'button', onclick() {
+      if (state.source === s.id) return;
+      // Locations, companies and premium belong to one section; the other filters carry over.
+      Object.assign(state, { source: s.id, places: [], company: '', premium: false });
+      sync();
+    } },
+      el('span', { className: `mark ${s.id}`, ariaHidden: 'true', textContent: s.mark }),
+      el('span', { className: 'name', textContent: s.name }),
+      el('span', { className: 'total', textContent: counts.length ? `${n.toLocaleString()} jobs` : '' }),
+      el('span', { className: 'about', textContent: s.about }));
+    b.setAttribute('aria-pressed', state.source === s.id);
+    return b;
+  }));
+}
+
 function renderTabs() {
-  const sum = (pred) => counts.filter(pred).reduce((n, r) => n + r.n, 0);
+  const sum = (pred) => counts.filter((r) => r.source === state.source && pred(r)).reduce((n, r) => n + r.n, 0);
   renderButtons($('categories'), CATEGORIES, 'category',
     (c) => sum((r) => matchesCategory(r.category, c) && matchesWorkplace(r.workplace, state.workplace)));
   renderButtons($('workplaces'), WORKPLACES, 'workplace',
@@ -438,7 +510,7 @@ const COUNTRY = { IN: 'India', US: 'United States', CA: 'Canada' };
 const placeGroup = (l) => (l.name.startsWith('Remote') ? 'Remote' : COUNTRY[l.country] ?? l.country ?? 'Other');
 function renderPlaces() {
   const box = $('places');
-  box.hidden = !LOCATIONS.length;
+  box.hidden = !LOCATIONS.length || state.source !== 'linkedin';   // the locations LinkedIn is searched in
   const picked = state.places;
   box.classList.toggle('picked', picked.length > 0);
   $('places-label').textContent = !picked.length ? 'Any location'
@@ -478,11 +550,16 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('places'
 
 // Premium companies first, the ones with the most new jobs this week leading; a company picked from search
 // that isn't premium is shown in front so it can be cleared.
+// In the Ashby section, the companies with the most jobs on their boards instead.
+const BOARD_CHIPS = 40;
 function renderCompanies() {
-  const premium = [...COMPANIES.values()].filter((c) => c.isPremium)
-    .sort((a, b) => b.jobsWeek - a.jobsWeek || a.sortOrder - b.sortOrder);
+  const ashby = state.source === 'ashby';
+  const premium = ashby ? BOARDS.slice(0, BOARD_CHIPS).map((b) => COMPANIES.get(b.slug))
+    : [...COMPANIES.values()].filter((c) => c.isPremium)
+      .sort((a, b) => b.jobsWeek - a.jobsWeek || a.sortOrder - b.sortOrder);
   const picked = state.company && COMPANIES.get(state.company);
-  const shown = picked && !picked.isPremium ? [picked, ...premium] : premium;
+  const shown = picked && !premium.includes(picked) ? [picked, ...premium] : premium;
+  const jobsOf = (c) => (ashby ? c.boardJobs : c.jobs);
   const chip = (label, pressed, onclick, extra = {}) => {
     const b = el('button', { className: 'tab', type: 'button', onclick, ...extra }, ...label);
     b.setAttribute('aria-pressed', pressed);
@@ -490,13 +567,14 @@ function renderCompanies() {
   };
   $('companies').hidden = !shown.length;
   $('companies').replaceChildren(...[
-    premium.length > 0 && chip(['Premium companies'], state.premium, () => { state.premium = !state.premium; sync(); },
+    !ashby && premium.length > 0 && chip(['Premium companies'], state.premium, () => { state.premium = !state.premium; sync(); },
       { title: 'Only jobs at premium companies' }),
-    ...shown.map((c) => chip([logo(c), c.name, el('span', { className: 'n', textContent: c.jobs })],
+    ...shown.map((c) => chip([logo(c), c.name, el('span', { className: 'n', textContent: jobsOf(c) ?? 0 })],
       state.company === c.slug, () => { state.company = state.company === c.slug ? '' : c.slug; sync(); },
-      { className: `tab${c.jobs ? '' : ' quiet'}`, title: `${c.jobsWeek} new this week` })),
+      { className: `tab${jobsOf(c) ? '' : ' quiet'}`, title: ashby ? `${jobsOf(c)} jobs on its Ashby board` : `${c.jobsWeek} new this week` })),
   ].filter(Boolean));
-  $('company-names').replaceChildren(...[...COMPANIES.values()].map((c) => el('option', { value: c.name })));
+  const names = ashby ? BOARDS.map((b) => COMPANIES.get(b.slug)) : [...COMPANIES.values()].filter((c) => c.jobs || c.isPremium);
+  $('company-names').replaceChildren(...names.map((c) => el('option', { value: c.name })));
 }
 
 /** Yearly pay, short: ₹12L and ₹1.2Cr for rupees, $150K elsewhere. */
@@ -555,15 +633,19 @@ function salaryButton(c, card) {
   return b;
 }
 
-// Shown above the list while one company is picked: its salary range and every role, open.
+// Shown above the list while one company is picked: its job board link, its salary range and every role, open.
 async function renderCompanyInfo() {
   const c = state.company && COMPANIES.get(state.company);
   const box = $('company-info');
-  if (!c || c.salaryMin == null) { box.hidden = true; box.replaceChildren(); return; }
+  const careers = safeUrl(c?.careersUrl);
+  if (!c || (c.salaryMin == null && !careers)) { box.hidden = true; box.replaceChildren(); return; }
   box.hidden = false;
-  box.replaceChildren(el('h2', {}, logo(c), c.name),
-    el('div', { className: 'meta' }, `${salaryRange(c)} a year across ${c.salaryRoles} role${c.salaryRoles === 1 ? '' : 's'}`,
-      c.glassdoorRating && ` · ${c.glassdoorRating}★ on Glassdoor`));
+  box.replaceChildren(...[el('h2', {}, logo(c), c.name),
+    c.salaryMin != null && el('div', { className: 'meta' }, `${salaryRange(c)} a year across ${c.salaryRoles} role${c.salaryRoles === 1 ? '' : 's'}`,
+      c.glassdoorRating && ` · ${c.glassdoorRating}★ on Glassdoor`),
+    careers && el('a', { className: 'board', href: careers, target: '_blank', rel: 'noopener',
+      textContent: `${c.name} careers page on Ashby ↗` })].filter(Boolean));
+  if (c.salaryMin == null) return;
   const rows = await salariesOf(c.slug);
   if (state.company === c.slug) box.append(salaryTable(rows));
 }
@@ -575,7 +657,7 @@ function jobItem(j) {
   return item;
 }
 
-// Each card opens the job's own page (job.html), which has the description and the button to apply on LinkedIn.
+// Each card opens the job's own page (job.html), which has the description and the button to apply.
 const jobPage = (j) => j.id != null && `job.html?id=${encodeURIComponent(j.id)}`;
 
 function jobCard(j) {
@@ -652,7 +734,9 @@ function sync() {
   for (const [k, v] of Object.entries(state)) {
     if (Array.isArray(v)) { if (v.length) params.set(k, v.join(',')); } else if (v && v !== 'all') params.set(k, v);
   }
+  if (state.source === 'linkedin') params.delete('source');   // the default section keeps short URLs
   history.replaceState(null, '', params.size ? `?${params}` : location.pathname);
+  renderSections();
   renderTabs();
   renderPlaces();
   renderExperience();
@@ -663,10 +747,11 @@ function sync() {
 
 function readUrl() {
   const p = new URLSearchParams(location.search);
+  if (SECTIONS.some((s) => s.id === p.get('source'))) state.source = p.get('source');
   if (CATEGORIES.some(([v]) => v === p.get('category'))) state.category = p.get('category');
   if (WORKPLACES.some(([v]) => v === p.get('workplace'))) state.workplace = p.get('workplace');
   const names = new Set(LOCATIONS.map((l) => l.name));
-  state.places = (p.get('places') ?? '').split(',').filter((n) => names.has(n));
+  state.places = state.source === 'linkedin' ? (p.get('places') ?? '').split(',').filter((n) => names.has(n)) : [];
   if (EXPERIENCE.some(([v]) => v && v === p.get('exp'))) state.exp = p.get('exp');
   state.unstated = p.get('unstated') === 'true';
   state.company = p.get('company') ?? '';
@@ -704,12 +789,18 @@ new IntersectionObserver((entries) => { if (entries[0].isIntersecting) loadMore(
   try {
     source = await (window.SUPABASE_URL && window.SUPABASE_ANON_KEY ? supabaseSource() : jsonSource());
     // Before the first scrape after an upgrade these views may not exist yet: the list still works.
-    const [categories, rows, companies, locations] = await Promise.all([
+    const [categories, rows, companies, locations, boards] = await Promise.all([
       source.categories().catch(() => FALLBACK_CATEGORIES), source.counts().catch(() => []), source.companies().catch(() => []),
-      source.locations().catch(() => []),
+      source.locations().catch(() => []), source.boards().catch(() => []),
     ]);
     LOCATIONS = locations;
     COMPANIES = new Map(companies.map((c) => [c.slug, c]));
+    // Board companies join the company list (logos, names, search suggestions) with their board link and job count.
+    for (const b of boards) {
+      const known = COMPANIES.get(b.slug) ?? { ...b, jobs: 0, jobsWeek: 0, isPremium: false };
+      COMPANIES.set(b.slug, { ...known, careersUrl: b.careersUrl, boardJobs: b.jobs });
+    }
+    BOARDS = boards;
     CATEGORIES = [['all', 'All'], ...categories.map((c) => [c.slug, c.label])];
     LABEL = Object.fromEntries(CATEGORIES);
     counts = rows;

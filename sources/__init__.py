@@ -7,6 +7,9 @@ on one platform:
   run(search, known)       scrapes one search -> Result(rows, meta, seen): rows shaped like public.jobs, meta
                            (counts, error), and the ids in `known` (jobs already saved) it found again
 
+Company job boards (Ashby, sources/ashby.py) aren't searched by keyword and location, so they aren't in AVAILABLE:
+boards.py reads them.
+
 To add a platform (Naukri, …): add sources/<name>.py with that interface, register it below, and add a row to the
 sources table. Locations name the platform's own spelling of a place in locations.source_params.<name>.location.
 """

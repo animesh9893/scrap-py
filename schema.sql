@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS sources (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO sources (id) VALUES ('linkedin') ON CONFLICT DO NOTHING;
+INSERT INTO sources (id) VALUES ('ashby') ON CONFLICT DO NOTHING;     -- company job boards, read by boards.py
 
 -- What to search for: titles and skills (frontend developer, java, react).
 CREATE TABLE IF NOT EXISTS search_keywords (
@@ -116,14 +117,20 @@ $$;
 -- isn't deleted before it is really `max_age` old; first_seen_at when there is none. Keeps jobs in a LinkedIn post
 -- or alert from the last 30 days, whose links (job.html?id=, alert.html) still get clicked. Their search hits go
 -- with them (ON DELETE CASCADE). Returns how many it deleted. Run by pg_cron every hour (below).
+-- Company job board jobs (Ashby) stay while the board lists them: they go a day after boards.py found them gone
+-- (closed_at), or 30 days after they were published.
 CREATE OR REPLACE FUNCTION delete_old_jobs(max_age INTERVAL DEFAULT '48 hours') RETURNS INTEGER
     LANGUAGE sql SET search_path = public AS $$
     WITH gone AS (
         DELETE FROM jobs j
-        WHERE COALESCE(CASE WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}$'
-                                THEN (j.posted_at::date + 1)::timestamp AT TIME ZONE 'UTC'
-                            WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}T' THEN j.posted_at::timestamptz END,
-                       j.first_seen_at) < now() - max_age
+        WHERE CASE WHEN j.source = 'ashby'
+                   THEN j.closed_at < now() - interval '1 day'
+                     OR COALESCE(CASE WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}T' THEN j.posted_at::timestamptz END,
+                                 j.first_seen_at) < now() - interval '30 days'
+                   ELSE COALESCE(CASE WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}$'
+                                          THEN (j.posted_at::date + 1)::timestamp AT TIME ZONE 'UTC'
+                                      WHEN j.posted_at ~ '^\d{4}-\d{2}-\d{2}T' THEN j.posted_at::timestamptz END,
+                                 j.first_seen_at) < now() - max_age END
           AND NOT EXISTS (SELECT 1 FROM post_jobs pj JOIN posts p ON p.id = pj.post_id
                           WHERE pj.source = j.source AND pj.job_id = j.job_id
                             AND p.created_at > now() - interval '30 days')
@@ -168,7 +175,8 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS experience_max SMALLINT
 -- The site's job list (base.sql has the first version), plus the company logo, "places": the names of the
 -- locations (locations.name) whose searches found the job, for the site's location filter, and the years of
 -- experience: "experienceMin"/"experienceMax" as the job says them (max NULL for "5+ years"), and
--- "experienceFrom"/"experienceTo", the range to filter on (5 to 5 for "5+ years", 0 to 99 when it doesn't say).
+-- "experienceFrom"/"experienceTo", the range to filter on (5 to 5 for "5+ years", 0 to 99 when it doesn't say), and
+-- the source, for the site's sections (linkedin, ashby). Company board jobs leave it as soon as the board drops them.
 CREATE OR REPLACE VIEW public_jobs AS
     SELECT j.job_id AS id, j.title, j.company, j.location, j.category, j.workplace, j.url,
            j.posted_at AS "postedAt", j.employment_type AS "employmentType", j.seniority,
@@ -179,9 +187,11 @@ CREATE OR REPLACE VIEW public_jobs AS
                  WHERE h.source = j.source AND h.job_id = j.job_id ORDER BY l.name) AS places,
            j.experience_min AS "experienceMin", j.experience_max AS "experienceMax",
            COALESCE(j.experience_min, 0) AS "experienceFrom",
-           COALESCE(j.experience_max, j.experience_min, 99) AS "experienceTo"
+           COALESCE(j.experience_max, j.experience_min, 99) AS "experienceTo",
+           j.source
     FROM jobs j LEFT JOIN companies c ON c.slug = j.company_slug
-    WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days';
+    WHERE j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days'
+      AND (j.source <> 'ashby' OR j.closed_at IS NULL);
 CREATE INDEX IF NOT EXISTS job_search_hits_job ON job_search_hits (source, job_id);
 
 -- Who posted the job, from LinkedIn's "Meet the hiring team" box (raw.hiring_team, the poster first), for
@@ -209,6 +219,34 @@ CREATE OR REPLACE VIEW public_locations AS
             WHERE h.location_id = l.id AND j.status <> 'skipped' AND j.first_seen_at > now() - interval '30 days') AS jobs
     FROM locations l WHERE l.is_active;
 
+-- Companies' own job boards (applicant tracking systems): Ashby for now, from data/ats-companies.csv, which db.py
+-- imports into companies (import_board_companies()). boards.py reads each board and records how it went.
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS ats TEXT;                 -- ashby
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS ats_slug TEXT;            -- the board: jobs.ashbyhq.com/<ats_slug>
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS careers_url TEXT;         -- the board's page, for people
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS website TEXT;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS country TEXT;             -- its main country (US, GB, IN…)
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS board_checked_at TIMESTAMPTZ;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS board_status TEXT;        -- ok | not_found | error
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS board_error TEXT;
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS board_jobs INTEGER;       -- jobs listed on the board, all kinds
+ALTER TABLE companies ADD COLUMN IF NOT EXISTS board_kept INTEGER;       -- of those, the tech jobs saved
+CREATE UNIQUE INDEX IF NOT EXISTS companies_board ON companies (ats, lower(ats_slug)) WHERE ats_slug IS NOT NULL;
+
+-- Job counts per site section (source), category and workplace, for the section switch and the tabs.
+CREATE OR REPLACE VIEW public_source_counts AS
+    SELECT source, category, workplace, COUNT(*)::int AS n FROM public_jobs GROUP BY source, category, workplace;
+
+-- Companies with a job board, for the site: the board's link and how many of its jobs are listed.
+CREATE OR REPLACE VIEW public_company_boards AS
+    SELECT c.slug, c.name, c.ats, c.careers_url AS "careersUrl", c.domain, c.logo_url AS "logoUrl", c.country,
+           COALESCE(n.jobs, 0) AS jobs
+    FROM companies c
+    LEFT JOIN (SELECT j.company_slug, j.source, COUNT(*)::int AS jobs FROM jobs j
+               WHERE j.status <> 'skipped' AND j.closed_at IS NULL AND j.first_seen_at > now() - interval '30 days'
+               GROUP BY j.company_slug, j.source) n ON n.company_slug = c.slug AND n.source = c.ats
+    WHERE c.ats IS NOT NULL;
+
 -- Private, like the old tables: RLS with no policies, and the site's public key can't read them.
 ALTER TABLE sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE search_keywords ENABLE ROW LEVEL SECURITY;
@@ -218,7 +256,8 @@ DO $$ BEGIN
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
         REVOKE ALL ON sources, search_keywords, locations, job_search_hits, company_stats FROM anon, authenticated;
         REVOKE EXECUTE ON FUNCTION upsert_jobs(JSONB), expire_jobs(INTEGER) FROM PUBLIC, anon, authenticated;
-        GRANT SELECT ON public_jobs, public_job_hiring, public_locations TO anon, authenticated;
+        GRANT SELECT ON public_jobs, public_job_hiring, public_locations, public_source_counts, public_company_boards
+            TO anon, authenticated;
     END IF;
 END $$;
 
@@ -236,6 +275,8 @@ DO $$ BEGIN
     ALTER VIEW public_companies SET (security_invoker = true);
     ALTER VIEW public_company_salaries SET (security_invoker = true);
     ALTER VIEW public_locations SET (security_invoker = true);
+    ALTER VIEW public_source_counts SET (security_invoker = true);
+    ALTER VIEW public_company_boards SET (security_invoker = true);
     ALTER VIEW public_linkedin_posts SET (security_invoker = true);
     ALTER VIEW public_post_images SET (security_invoker = true);
     ALTER VIEW public_alert_jobs SET (security_invoker = true);
@@ -243,9 +284,10 @@ DO $$ BEGIN
         GRANT SELECT (source, job_id, title, company, location, category, workplace, url, apply_url, salary, description,
                       posted_at, employment_type, seniority, first_seen_at, company_slug, role, level, tags, status,
                       company_logo, hiring_manager_name, hiring_manager_title, hiring_manager_url,
-                      experience_min, experience_max)
+                      experience_min, experience_max, closed_at)
             ON jobs TO anon, authenticated;
-        GRANT SELECT (slug, name, domain, is_premium, sort_order, logo_url, employees, glassdoor_rating)
+        GRANT SELECT (slug, name, domain, is_premium, sort_order, logo_url, employees, glassdoor_rating,
+                      ats, careers_url, country)
             ON companies TO anon, authenticated;
         GRANT SELECT (company_slug, job_title, currency, min_annual, median_annual, max_annual,
                       min_usd, median_usd, max_usd, fetched_at, query)

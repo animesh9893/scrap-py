@@ -8,6 +8,9 @@
   save()           one search, in its own transaction: upserts the jobs with upsert_jobs() (new vs seen before),
                    marks the known jobs it found again as seen, records which search found each job in
                    job_search_hits and the run in runs
+  import_board_companies()  adds the companies in data/ats-companies.csv, with their job boards (Ashby), to companies
+  due_boards()     the companies whose job board is due a read (boards.py)
+  save_board()     one board's jobs: upserts them, points them at the company, closes the ones the board dropped
   finish()         links jobs to companies (link_companies(), from the old project), closes jobs not seen for
                    EXPIRE_DAYS (expire_jobs()) and re-reads the years of experience of saved jobs read by an older
                    experience.py (reparse_experience())
@@ -16,6 +19,7 @@ Rows come from the sources, shaped like public.jobs; to_db_row() turns them into
 the site's views, Telegram alerts and LinkedIn posts read them like any other job.
 """
 
+import csv
 import hashlib
 import json
 import logging
@@ -30,6 +34,7 @@ import experience
 HERE = os.path.dirname(os.path.abspath(__file__))
 SCHEMA = [os.path.join(HERE, "base.sql"), os.path.join(HERE, "schema.sql"),   # the old project's tables, then ours,
           os.path.join(HERE, "premium.sql")]                                       # then the premium companies
+BOARDS_CSV = os.path.join(HERE, "data", "ats-companies.csv")   # companies with a job board, imported after the SQL
 BATCH = 200      # jobs per upsert_jobs() call
 REPARSE = 3000   # jobs per run whose years of experience reparse_experience() re-reads
 
@@ -76,7 +81,7 @@ def to_db_row(r, category):
 
 def schema_digest():
     h = hashlib.sha256()
-    for path in SCHEMA:
+    for path in SCHEMA + [BOARDS_CSV]:
         with open(path, "rb") as f:
             h.update(f.read())
     return h.hexdigest()
@@ -95,6 +100,7 @@ def apply_schema(conn):
         for path in SCHEMA:
             with open(path, encoding="utf-8") as f:
                 conn.execute(f.read())
+        import_board_companies(conn)
         conn.execute("""CREATE TABLE IF NOT EXISTS scrap_py_schema (
                             id INTEGER PRIMARY KEY DEFAULT 1 CHECK (id = 1), digest TEXT NOT NULL,
                             applied_at TIMESTAMPTZ NOT NULL DEFAULT now());
@@ -195,6 +201,126 @@ def save(conn, search, result):
                      ("FAILED" if error and not unique and not result.seen else "SUCCEEDED", counts["scanned"], new,
                       sum(counts["skipped"].values()), error, json.dumps(meta), run_id))
     return {"new": new, "updated": len(unique) - new, "seen": seen, "run_id": run_id}
+
+
+def read_boards_csv(path=BOARDS_CSV):
+    """data/ats-companies.csv (company, careers_page, website, main_country, open_jobs, ats) as dicts for
+    import_board_companies(): one per board, the boards it can read (jobs.ashbyhq.com/<board> for now)."""
+    from sources import ashby
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    out = {}
+    for r in rows:
+        ats, name = (r.get("ats") or "").strip().lower(), (r.get("company") or "").strip()
+        board = ashby.board_slug(r.get("careers_page")) if ats == "ashby" else None
+        if not board or not name or (ats, board.lower()) in out:
+            continue
+        jobs = (r.get("open_jobs") or "").strip()
+        out[(ats, board.lower())] = {"name": name, "ats": ats, "board": board,
+                                     "careers_url": f"https://jobs.ashbyhq.com/{board}",
+                                     "website": (r.get("website") or "").strip() or None,
+                                     "country": (r.get("main_country") or "").strip().upper() or None,
+                                     "open_jobs": int(jobs) if jobs.isdigit() else 0}
+    return list(out.values())
+
+
+def import_board_companies(conn, path=BOARDS_CSV):
+    """Adds the CSV's companies with their job boards. A board already in companies gets its link, site and country
+    refreshed. Else a company of the same name (company_key(), as link_companies() matches) gets the board, so the
+    LinkedIn jobs and the board's jobs share one company; else the company is added. Of several boards whose names
+    match (three different "Tempo"s), the one with the most jobs gets the name, so LinkedIn jobs link to it; the
+    others are added without name_keys. Returns how many companies it added."""
+    items = json.dumps(read_boards_csv(path))
+    conn.execute("""
+        CREATE TEMP TABLE IF NOT EXISTS board_import (name TEXT, ats TEXT, board TEXT, careers_url TEXT, website TEXT,
+                                                     country TEXT, open_jobs INT, key TEXT, domain TEXT, first BOOLEAN);
+        TRUNCATE board_import""")
+    conn.execute("""
+        INSERT INTO board_import
+        SELECT name, ats, board, careers_url, website, country, open_jobs, company_key(name),
+               NULLIF(lower(substring(website FROM '^https?://(?:www\\.)?([^/:?#]+)')), ''),
+               row_number() OVER (PARTITION BY company_key(name) ORDER BY open_jobs DESC, board) = 1
+        FROM jsonb_to_recordset(%s::jsonb)
+             AS x(name TEXT, ats TEXT, board TEXT, careers_url TEXT, website TEXT, country TEXT, open_jobs INT)""",
+                 (items,))
+    conn.execute("""
+        UPDATE companies c SET careers_url = i.careers_url, website = i.website, country = i.country,
+                               domain = COALESCE(c.domain, i.domain)
+        FROM board_import i WHERE c.ats = i.ats AND lower(c.ats_slug) = lower(i.board)""")
+    # Existing companies by name: each board to one company and each company to one board.
+    conn.execute("""
+        UPDATE companies c SET ats = m.ats, ats_slug = m.board, careers_url = m.careers_url, website = m.website,
+                               country = m.country, domain = COALESCE(c.domain, m.domain)
+        FROM (SELECT DISTINCT ON (slug) * FROM (
+                  SELECT DISTINCT ON (i.ats, i.board) i.*, c.slug
+                  FROM board_import i JOIN companies c ON i.key = ANY (c.name_keys) AND c.ats_slug IS NULL
+                  WHERE i.first AND NOT EXISTS (SELECT 1 FROM companies o
+                                                WHERE o.ats = i.ats AND lower(o.ats_slug) = lower(i.board))
+                  ORDER BY i.ats, i.board, c.is_premium DESC, c.slug) t
+              ORDER BY slug, open_jobs DESC) m
+        WHERE c.slug = m.slug""")
+    added = 0
+    # The rest are new: slugged from the name, then name-board when that is taken, then board-ats.
+    for slug in ("base", "base || '-' || lower(i.board)", "lower(i.board) || '-' || i.ats"):
+        added += conn.execute(f"""
+            INSERT INTO companies (slug, name, name_keys, domain, ats, ats_slug, careers_url, website, country)
+            SELECT {slug}, i.name, CASE WHEN i.first AND i.key IS NOT NULL THEN ARRAY[i.key] ELSE '{{}}' END,
+                   i.domain, i.ats, i.board, i.careers_url, i.website, i.country
+            FROM (SELECT *, trim(BOTH '-' FROM regexp_replace(lower(name), '[^a-z0-9]+', '-', 'g')) AS base
+                  FROM board_import) i
+            WHERE i.base <> '' AND NOT EXISTS (SELECT 1 FROM companies o
+                                               WHERE o.ats = i.ats AND lower(o.ats_slug) = lower(i.board))
+            ON CONFLICT DO NOTHING""").rowcount
+    return added
+
+
+def due_boards(conn, ats, interval_hours, limit=None, board=None):
+    """Companies whose job board wasn't read in the last `interval_hours` (never read first, then the longest ago),
+    as (slug, name, board). Boards that weren't found are tried again weekly. `board`: only that one, due or not."""
+    if board:
+        return conn.execute("SELECT slug, name, ats_slug FROM companies WHERE ats = %s AND lower(ats_slug) = lower(%s)",
+                            (ats, board)).fetchall()
+    return conn.execute(
+        """SELECT slug, name, ats_slug FROM companies
+           WHERE ats = %s AND ats_slug IS NOT NULL
+             AND (board_checked_at IS NULL OR board_checked_at < now() - CASE WHEN board_status = 'not_found'
+                  THEN interval '7 days' ELSE make_interval(hours => %s) END)
+           ORDER BY board_checked_at NULLS FIRST, slug LIMIT %s""", (ats, interval_hours, limit)).fetchall()
+
+
+def save_board(conn, source, company_slug, rows, counts, status="ok", error=None):
+    """One board's read, in its own transaction: upserts its jobs (rows from sources.<ats>.rows()), points them at
+    the company, closes its saved jobs the board no longer lists, and records the read on the company. A board that
+    failed (status error / not_found) only gets that recorded. Returns {"new", "updated", "closed"}."""
+    unique = list({r["job_id"]: r for r in rows}.values())
+    new = closed = 0
+    with conn.transaction():
+        if status == "ok":
+            db_rows = [to_db_row(r, None) for r in unique]
+            for i in range(0, len(db_rows), BATCH):
+                cur = conn.execute("SELECT inserted FROM upsert_jobs(%s::jsonb)", (json.dumps(db_rows[i:i + BATCH]),))
+                new += sum(inserted for (inserted,) in cur.fetchall())
+            ids = [r["job_id"] for r in unique]
+            conn.execute("UPDATE jobs SET company_slug = %s WHERE source = %s AND job_id = ANY(%s)",
+                         (company_slug, source, ids))
+            closed = conn.execute("""UPDATE jobs SET closed_at = now()
+                                     WHERE source = %s AND company_slug = %s AND closed_at IS NULL
+                                       AND NOT (job_id = ANY(%s))""", (source, company_slug, ids)).rowcount
+        conn.execute("""UPDATE companies SET board_checked_at = now(), board_status = %s, board_error = %s,
+                                             board_jobs = COALESCE(%s, board_jobs), board_kept = COALESCE(%s, board_kept)
+                        WHERE slug = %s""",
+                     (status, error, counts.get("listed") if status == "ok" else None,
+                      counts.get("kept") if status == "ok" else None, company_slug))
+    return {"new": new, "updated": len(unique) - new, "closed": closed}
+
+
+def record_run(conn, source, name, meta, error=None):
+    """A boards.py run in the runs table, with its counts in details."""
+    conn.execute("""INSERT INTO runs (search_name, actor, status, source, items_found, items_new, error, details,
+                                      finished_at)
+                    VALUES (%s, 'scrap-py', %s, %s, %s, %s, %s, %s, now())""",
+                 (name, "FAILED" if error else "SUCCEEDED", source, meta.get("listed", 0), meta.get("new", 0), error,
+                  json.dumps(meta)))
 
 
 def reparse_experience(conn, limit=REPARSE):

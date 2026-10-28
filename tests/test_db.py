@@ -211,3 +211,61 @@ def test_reparse_experience_and_the_board_filter_columns(conn):
     got = dict((r[0], r[1:]) for r in conn.execute(
         """SELECT id, "experienceMin", "experienceMax", "experienceFrom", "experienceTo" FROM public_jobs""").fetchall())
     assert got == {"old": (3, 5, 3, 5), "current": (9, None, 9, 9), "none": (None, None, 0, 99)}
+
+
+def test_board_companies_and_save_board(conn, tmp_path):
+    import db
+    from sources import ashby
+    from test_ashby import NOW, board
+    conn.execute("""INSERT INTO companies (slug, name, name_keys, linkedin_slug)
+                    VALUES ('acme-inc', 'Acme Inc', ARRAY[company_key('Acme Inc')], 'acme-inc')""")
+    csv = tmp_path / "ats.csv"
+    csv.write_text("company,careers_page,website,main_country,open_jobs,ats\n"
+                   "Acme,https://jobs.ashbyhq.com/acme,https://www.acme.com/about,us,12,Ashby\n"
+                   "Tempo,https://jobs.ashbyhq.com/tempo,https://tempo.io,GB,30,Ashby\n"
+                   "Tempo,https://jobs.ashbyhq.com/tempo-labs,,US,2,Ashby\n"
+                   "Tempo,https://jobs.ashbyhq.com/tempo,,US,2,Ashby\n"                  # same board again
+                   "Nope,https://boards.greenhouse.io/nope,,US,2,Greenhouse\n", encoding="utf-8")
+    assert db.import_board_companies(conn, str(csv)) == 2
+    assert db.import_board_companies(conn, str(csv)) == 0                              # safe to repeat
+    rows = conn.execute("""SELECT slug, ats_slug, careers_url, domain, country, name_keys FROM companies
+                           WHERE ats = 'ashby' ORDER BY slug""").fetchall()
+    assert rows == [("acme-inc", "acme", "https://jobs.ashbyhq.com/acme", "acme.com", "US", ["acme"]),   # by name
+                    ("tempo", "tempo", "https://jobs.ashbyhq.com/tempo", "tempo.io", "GB", ["tempo"]),
+                    ("tempo-tempo-labs", "tempo-labs", "https://jobs.ashbyhq.com/tempo-labs", None, "US", [])]
+
+    assert [b[2] for b in db.due_boards(conn, "ashby", 6)] == ["acme", "tempo", "tempo-labs"]
+    rows, counts = ashby.rows(board(), "Acme", "acme", NOW, max_age_days=0)
+    saved = db.save_board(conn, "ashby", "acme-inc", rows, counts)
+    assert saved == {"new": 3, "updated": 0, "closed": 0}
+    assert [b[2] for b in db.due_boards(conn, "ashby", 6)] == ["tempo", "tempo-labs"]
+    db.save_board(conn, "ashby", "tempo", [], {}, "not_found", "gone")
+
+    listed = conn.execute("""SELECT id, source, "companySlug", workplace, "experienceMin" FROM public_jobs
+                             ORDER BY id""").fetchall()
+    assert [(r[1], r[2]) for r in listed] == [("ashby", "acme-inc")] * 3
+    assert conn.execute("SELECT jobs, \"careersUrl\" FROM public_company_boards WHERE slug = 'acme-inc'").fetchone() == \
+        (3, "https://jobs.ashbyhq.com/acme")
+    assert conn.execute("SELECT sum(n) FROM public_source_counts WHERE source = 'ashby'").fetchone()[0] == 3
+
+    # Read again without the old Data Engineer job: it's closed and leaves the site, the others stay.
+    rows, counts = ashby.rows(board(), "Acme", "acme", NOW, max_age_days=30)
+    saved = db.save_board(conn, "ashby", "acme-inc", rows, counts)
+    assert saved == {"new": 0, "updated": 2, "closed": 1}
+    assert conn.execute("SELECT count(*) FROM public_jobs WHERE source = 'ashby'").fetchone()[0] == 2
+    assert conn.execute("SELECT board_status, board_jobs, board_kept FROM companies WHERE slug = 'acme-inc'").fetchone() \
+        == ("ok", 6, 2)
+    assert conn.execute("SELECT board_status, board_error FROM companies WHERE slug = 'tempo'").fetchone() == \
+        ("not_found", "gone")
+
+    # Closed for over a day, or published over 30 days ago: delete_old_jobs() drops it; LinkedIn's 48 hours don't apply.
+    conn.execute("UPDATE jobs SET closed_at = now() - interval '2 days' WHERE title = 'Data Engineer'")
+    conn.execute("UPDATE jobs SET posted_at = NULL WHERE title <> 'Data Engineer'")      # the fixture's dates age
+    assert conn.execute("SELECT delete_old_jobs()").fetchone()[0] == 1
+    assert conn.execute("SELECT count(*) FROM jobs WHERE source = 'ashby'").fetchone()[0] == 2
+
+
+def test_boards_csv_in_repo():
+    import db
+    boards = db.read_boards_csv()
+    assert len(boards) > 3000 and all(b["ats"] == "ashby" and b["board"] for b in boards)

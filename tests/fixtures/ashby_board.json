@@ -1,0 +1,124 @@
+{
+ "apiVersion": "1",
+ "jobs": [
+  {
+   "id": "240d459b-696d-43eb-8497-fab3e56ecd9b",
+   "title": "Backend Software Engineer",
+   "department": "Engineering",
+   "team": "Platform",
+   "employmentType": "FullTime",
+   "location": "San Francisco, California, United States",
+   "secondaryLocations": [
+    {
+     "location": "New York, New York, United States",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "United States"
+      }
+     }
+    },
+    {
+     "location": "Remote - US",
+     "address": {}
+    }
+   ],
+   "publishedAt": "2026-10-20T10:03:20.653+00:00",
+   "isListed": true,
+   "isRemote": false,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressLocality": "San Francisco",
+     "addressRegion": "California",
+     "addressCountry": "United States"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/acme/240d459b-696d-43eb-8497-fab3e56ecd9b",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/240d459b-696d-43eb-8497-fab3e56ecd9b/application",
+   "descriptionHtml": "<p>About the role</p>",
+   "descriptionPlain": "About the role\n\nYou have 3-5 years of experience building APIs in Python.",
+   "shouldDisplayCompensationOnJobPostings": true,
+   "compensation": {
+    "compensationTierSummary": "$150K – $200K • Offers Equity",
+    "scrapeableCompensationSalarySummary": "$150K - $200K",
+    "compensationTiers": [],
+    "summaryComponents": []
+   }
+  },
+  {
+   "id": "7322d344-9325-4a92-8445-0a2c4e9272f8",
+   "title": "Frontend Engineer (React)",
+   "department": "Engineering",
+   "team": null,
+   "employmentType": "FullTime",
+   "location": "Bengaluru",
+   "secondaryLocations": [],
+   "publishedAt": "2026-10-27T08:00:00.000+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "address": {
+    "postalAddress": {
+     "addressCountry": "India"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/acme/7322d344-9325-4a92-8445-0a2c4e9272f8",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/7322d344-9325-4a92-8445-0a2c4e9272f8/application",
+   "descriptionHtml": "",
+   "descriptionPlain": "Build our web app.",
+   "shouldDisplayCompensationOnJobPostings": false,
+   "compensation": {
+    "compensationTierSummary": "₹30L – ₹45L",
+    "scrapeableCompensationSalarySummary": null
+   }
+  },
+  {
+   "id": "a1",
+   "title": "Account Executive",
+   "department": "Sales",
+   "employmentType": "FullTime",
+   "location": "London",
+   "publishedAt": "2026-10-25T08:00:00.000+00:00",
+   "isListed": true,
+   "jobUrl": "https://jobs.ashbyhq.com/acme/a1",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/a1/application",
+   "descriptionPlain": "Sell."
+  },
+  {
+   "id": "a2",
+   "title": "Solutions Engineer",
+   "department": "Sales",
+   "employmentType": "FullTime",
+   "location": "London",
+   "publishedAt": "2026-10-25T08:00:00.000+00:00",
+   "isListed": true,
+   "jobUrl": "https://jobs.ashbyhq.com/acme/a2",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/a2/application",
+   "descriptionPlain": "Demo."
+  },
+  {
+   "id": "a3",
+   "title": "Data Engineer",
+   "department": "Data",
+   "employmentType": "Contract",
+   "location": "Toronto",
+   "publishedAt": "2025-01-05T08:00:00.000+00:00",
+   "isListed": true,
+   "jobUrl": "https://jobs.ashbyhq.com/acme/a3",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/a3/application",
+   "descriptionPlain": "Old."
+  },
+  {
+   "id": "a4",
+   "title": "Machine Learning Engineer",
+   "department": "AI",
+   "employmentType": "Intern",
+   "location": "Remote",
+   "publishedAt": "2026-10-26T08:00:00.000+00:00",
+   "isListed": false,
+   "jobUrl": "https://jobs.ashbyhq.com/acme/a4",
+   "applyUrl": "https://jobs.ashbyhq.com/acme/a4/application",
+   "descriptionPlain": "Hidden."
+  }
+ ]
+}
