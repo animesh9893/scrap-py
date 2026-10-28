@@ -115,6 +115,32 @@ the files.
 Tagging, Telegram alerts and LinkedIn posts are still the old project's Node steps; they read the jobs from the
 database, so they work on what this saves.
 
+## Ashby job boards
+
+The site's second section, **Ashby jobs**, lists jobs straight from companies' own career pages on
+[Ashby](https://www.ashbyhq.com/) (`jobs.ashbyhq.com/<board>`). Ashby has a public posting API that returns every job
+on a board, with its description and pay, in one request (`https://api.ashbyhq.com/posting-api/job-board/<board>?includeCompensation=true`),
+so there are no keyword × location searches, logins or page scraping.
+
+- **The companies:** `data/ats-companies.csv` (company, careers_page, website, main_country, open_jobs, ats), about
+  3,400 companies using Ashby. When it changes, the next run of any workflow imports it into `companies`
+  (`db.import_board_companies()`): `ats` = `ashby`, `ats_slug` (the board), `careers_url`, `website`, `country`, and
+  `domain` from the website (the favicon logo). A company already in the table by the same name (as
+  `link_companies()` matches names) gets the board, so its LinkedIn jobs and board jobs are one company; the others
+  are added. To add or drop companies, edit the CSV (a company removed from it keeps its row).
+- **The reader:** `boards.py` (Actions → **Ashby jobs**, every 2 hours in proj-berry/scrap-py) reads the boards not
+  read in the last 6 hours, 6 at a time, and saves the **tech jobs** (`sources/ashby.py`: engineering, data, AI,
+  DevOps, QA, security titles; not sales, solutions, support or recruiting) **published in the last 30 days**, with
+  `source = 'ashby'`. A job the board no longer lists is closed at once and leaves the site; `delete_old_jobs()`
+  deletes it a day later, or 30 days after it was published (LinkedIn's 48 hours don't apply). Each company records
+  `board_checked_at`, `board_status` (ok, not_found, error), `board_jobs` (all jobs listed) and `board_kept`. Boards
+  Ashby doesn't know are retried weekly. Run one board by hand with **board** = `openai`, or locally:
+  `BOARD=openai python boards.py` (prints its jobs; add `DATABASE_URL` to save). Settings: `MAX_BOARDS`,
+  `BOARD_INTERVAL_HOURS` (6), `MAX_AGE_DAYS` (30), `WORKERS` (6), `TIME_BUDGET_MINUTES` (40).
+- **The site:** `public_jobs.source` splits the board into the two sections; `public_source_counts` counts them and
+  `public_company_boards` lists the board companies with their careers page and job count (the Ashby section's
+  company chips, and the "careers page on Ashby" link above a picked company's jobs).
+
 ## Filters
 
 LinkedIn's logged-out search applies only some filters itself. The scraper checks the others on each job, and keeps
@@ -210,7 +236,8 @@ pytest tests
 | `scrape.py` | the run: mode, searches, outputs, saving |
 | `search.py` | one search's settings (`Search`), from the environment or the lists |
 | `planner.py` | which searches are due |
-| `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now |
+| `sources/` | one module per platform, all with the same interface (`sources/__init__.py`); `linkedin.py` now, and `ashby.py` (company job boards, read by `boards.py`) |
+| `boards.py`, `data/ats-companies.csv` | the Ashby job boards: the companies, and the run that reads their boards |
 | `report.py` | `jobs.json`, `jobs.csv`, `jobs.md`, `report.html`, `summary.md` |
 | `experience.py` | the years of experience a job asks for, from its title and description (the site's Experience filter) |
 | `db.py`, `schema.sql`, `seed.sql`, `premium.sql` | Supabase (`premium.sql`: the premium companies and their hashtags) |

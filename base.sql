@@ -194,7 +194,7 @@ BEGIN
     WHERE c.slug = target AND j.company_slug IS DISTINCT FROM c.slug
       AND (c.linkedin_slug = linkedin_company_slug(j.company_url) OR company_key(j.company) = ANY (c.name_keys));
     GET DIAGNOSTICS n = ROW_COUNT;
-    DELETE FROM companies c WHERE NOT c.is_premium AND c.linkedin_id IS NULL AND c.domain IS NULL
+    DELETE FROM companies c WHERE NOT c.is_premium AND c.linkedin_id IS NULL AND c.domain IS NULL AND c.ats IS NULL
                               AND NOT EXISTS (SELECT 1 FROM jobs WHERE company_slug = c.slug);
     RETURN n;
 END $$;
