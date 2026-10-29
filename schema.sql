@@ -164,6 +164,8 @@ ALTER TABLE jobs ADD COLUMN IF NOT EXISTS experience_min SMALLINT
     GENERATED ALWAYS AS ((raw->'experience_years'->>'min')::smallint) STORED;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS experience_max SMALLINT
     GENERATED ALWAYS AS ((raw->'experience_years'->>'max')::smallint) STORED;
+-- Finds the jobs db.reparse_experience() has to re-read without loading every job's raw JSON on every run.
+CREATE INDEX IF NOT EXISTS jobs_experience_parser ON jobs ((COALESCE((raw->>'experience_parser')::int, 0)));
 
 -- The site's job list (base.sql has the first version), plus the company logo, "places": the names of the
 -- locations (locations.name) whose searches found the job, for the site's location filter, and the years of

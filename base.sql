@@ -176,10 +176,12 @@ BEGIN
           WHERE ls IS NOT NULL ORDER BY ls, company_slug) s
     WHERE c.slug = s.company_slug AND c.linkedin_slug IS NULL
       AND NOT EXISTS (SELECT 1 FROM companies o WHERE o.linkedin_slug = s.ls);
+    -- company_logo (schema.sql) is raw.companyLogo as a column: reading raw itself would load every job's full JSON
+    -- from disk on every run. Jobs from the last day are enough, as the database only keeps 48 hours of them.
     UPDATE companies c SET logo_url = s.logo
-    FROM (SELECT DISTINCT ON (company_slug) company_slug, raw->>'companyLogo' AS logo FROM jobs
-          WHERE company_slug IS NOT NULL AND raw->>'companyLogo' LIKE 'https://%'
-            AND first_seen_at > now() - interval '7 days'
+    FROM (SELECT DISTINCT ON (company_slug) company_slug, company_logo AS logo FROM jobs
+          WHERE company_slug IS NOT NULL AND company_logo LIKE 'https://%'
+            AND first_seen_at > now() - interval '1 day'
           ORDER BY company_slug, first_seen_at DESC) s
     WHERE c.slug = s.company_slug AND c.logo_url IS DISTINCT FROM s.logo;
     RETURN linked;
